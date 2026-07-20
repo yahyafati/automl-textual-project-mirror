@@ -88,7 +88,9 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--num-workers", type=int)
-    parser.add_argument("--optimizer", choices=["smac", "random", "rl_freeze_thaw"])
+    parser.add_argument(
+        "--optimizer", choices=["smac", "random", "ifbo", "rl_freeze_thaw"]
+    )
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
 
     return parser
