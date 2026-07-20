@@ -1,0 +1,30 @@
+version: 1
+disable_existing_loggers: false
+formatters:
+  colored:
+    '()': automl.logger.TruncatingFormatter
+    format: '%(log_color)s%(asctime)s  | %(levelname)-7s | %(name)-12s | %(filename)s:%(lineno)-4d | %(message)s'
+    datefmt: "%Y-%m-%d %H:%M:%S"
+    log_colors:
+      DEBUG: cyan
+      INFO: green
+      WARNING: yellow
+      ERROR: red
+      CRITICAL: bold_red
+  simple:
+    format: '%(asctime)s  | %(levelname)-7s | %(name)-12s | %(filename)s:%(lineno)-4d | %(message)s'
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: colored
+    stream: ext://sys.stdout
+#  file:
+#    class: logging.FileHandler
+#    level: INFO
+#    formatter: simple
+#    filename: DUMMY_WILL_BE_OVERRIDDEN
+
+root:
+  level: INFO
+  handlers: [ console ]  # we'll optionally append "file"

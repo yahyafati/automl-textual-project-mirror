@@ -13,6 +13,7 @@ python run.py \
 ```
 
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,34 +29,34 @@ from automl.datasets import (
     AmazonReviewsDataset,
     DBpediaDataset,
     IMDBDataset,
-    YelpDataset
+    YelpDataset,
 )
 
 logger = logging.getLogger(__name__)
 
-FINAL_TEST_DATASET="yelp" 
+FINAL_TEST_DATASET = "yelp"
 
 
 def main_loop(
-        dataset: str,
-        output_path: Path,
-        data_path: Path,
-        seed: int,
-        approach: str,
-        val_size: float = 0.2,
-        vocab_size: int = 10000,
-        token_length: int = 128,
-        epochs: int = 5,
-        batch_size: int = 32,
-        lr: float = 0.0001,
-        weight_decay: float = 0.01,
-        ffnn_hidden: int = 128,
-        lstm_emb_dim: int = 128,
-        lstm_hidden_dim: int = 128,
-        fraction_layers_to_finetune: float = 1.0,
-        data_fraction: int = 1.0,
-        load_path: Path = None,
-    ) -> None:
+    dataset: str,
+    output_path: Path,
+    data_path: Path,
+    seed: int,
+    approach: str,
+    val_size: float = 0.2,
+    vocab_size: int = 10000,
+    token_length: int = 128,
+    epochs: int = 5,
+    batch_size: int = 32,
+    lr: float = 0.0001,
+    weight_decay: float = 0.01,
+    ffnn_hidden: int = 128,
+    lstm_emb_dim: int = 128,
+    lstm_hidden_dim: int = 128,
+    fraction_layers_to_finetune: float = 1.0,
+    data_fraction: int = 1.0,
+    load_path: Path = None,
+) -> None:
     match dataset:
         case "ag_news":
             dataset_class = AGNewsDataset
@@ -79,19 +80,21 @@ def main_loop(
 
     # Get the dataset and create dataloaders
     data_path = Path(data_path) if isinstance(data_path, str) else data_path
-    data_info = dataset_class(data_path).create_dataloaders(val_size=val_size, random_state=seed)
-    train_df = data_info['train_df']
-    
+    data_info = dataset_class(data_path).create_dataloaders(
+        val_size=val_size, random_state=seed
+    )
+    train_df = data_info["train_df"]
+
     _subsample = np.random.choice(
         list(range(len(train_df))),
         size=int(data_fraction * len(train_df)),
         replace=False,
     )
     train_df = train_df.iloc[_subsample]
-    
-    val_df = data_info.get('val_df', None)
-    test_df = data_info['test_df']
-    num_classes = data_info['num_classes']
+
+    val_df = data_info.get("val_df", None)
+    test_df = data_info["test_df"]
+    num_classes = data_info["num_classes"]
     logger.info(
         f"Train size: {len(train_df)}, Validation size: {len(val_df)}, Test size: {len(test_df)}"
     )
@@ -137,7 +140,7 @@ def main_loop(
 
     # In case of running on the final exam data, also add the predictions.npy
     # to the correct location for auto evaluation.
-    if dataset == FINAL_TEST_DATASET: 
+    if dataset == FINAL_TEST_DATASET:
         test_output_path = output_path / "predictions.npy"
         test_output_path.parent.mkdir(parents=True, exist_ok=True)
         with test_output_path.open("wb") as f:
@@ -148,8 +151,8 @@ def main_loop(
         acc = accuracy_score(test_labels, test_preds)
         logger.info(f"Accuracy on test set: {acc}")
         with (output_path / "score.yaml").open("a+") as f:
-            yaml.safe_dump({"test_err": float(1-acc)}, f)
-        
+            yaml.safe_dump({"test_err": float(1 - acc)}, f)
+
         # Log detailed classification report for better insight
         logger.info("Classification Report:")
         logger.info(f"\n{classification_report(test_labels, test_preds)}")
@@ -168,7 +171,7 @@ if __name__ == "__main__":
         type=str,
         required=True,
         help="The name of the dataset to run on.",
-        choices=["ag_news", "imdb", "amazon", "dbpedia", "yelp"]
+        choices=["ag_news", "imdb", "amazon", "dbpedia", "yelp"],
     )
     parser.add_argument(
         "--output-path",
@@ -177,13 +180,13 @@ if __name__ == "__main__":
         help=(
             "The path to save the predictions to."
             " By default this will just save to the cwd as `./results`."
-        )
+        ),
     )
     parser.add_argument(
         "--load-path",
         type=Path,
         default=None,
-        help="The path to resume checkpoint from."
+        help="The path to resume checkpoint from.",
     )
     parser.add_argument(
         "--data-path",
@@ -192,7 +195,7 @@ if __name__ == "__main__":
         help=(
             "The path to laod the data from."
             " By default this will look up cwd for `./.data/`."
-        )
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -201,7 +204,7 @@ if __name__ == "__main__":
         help=(
             "Random seed for reproducibility if you are using any randomness,"
             " i.e. torch, numpy, pandas, sklearn, etc."
-        )
+        ),
     )
     parser.add_argument(
         "--approach",
@@ -211,82 +214,82 @@ if __name__ == "__main__":
         help=(
             "The approach to use for the AutoML system. "
             "Options are 'tfidf', 'lstm', or 'transformer'."
-        )
+        ),
     )
     parser.add_argument(
         "--vocab-size",
         type=int,
         default=1000,
-        help="The size of the vocabulary to use for the text dataset."
+        help="The size of the vocabulary to use for the text dataset.",
     )
     parser.add_argument(
         "--token-length",
         type=int,
         default=128,
-        help="The maximum length of tokens to use for the text dataset."
+        help="The maximum length of tokens to use for the text dataset.",
     )
     parser.add_argument(
         "--epochs",
         type=int,
         default=5,
-        help="The number of epochs to train the model for."
+        help="The number of epochs to train the model for.",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=32,
-        help="The batch size to use for training and evaluation."
+        help="The batch size to use for training and evaluation.",
     )
     parser.add_argument(
         "--lr",
         type=float,
         default=0.01,
-        help="The learning rate to use for the optimizer."
+        help="The learning rate to use for the optimizer.",
     )
     parser.add_argument(
         "--weight-decay",
         type=float,
         default=0.01,
-        help="The weight decay to use for the optimizer."
+        help="The weight decay to use for the optimizer.",
     )
 
     parser.add_argument(
         "--lstm-emb-dim",
         type=int,
         default=64,
-        help="The embedding dimension to use for the LSTM model."
+        help="The embedding dimension to use for the LSTM model.",
     )
 
     parser.add_argument(
         "--lstm-hidden-dim",
         type=int,
         default=64,
-        help="The hidden size to use for the LSTM model."
+        help="The hidden size to use for the LSTM model.",
     )
 
     parser.add_argument(
         "--ffnn-hidden-layer-dim",
         type=int,
         default=64,
-        help="The hidden size to use for the model."
+        help="The hidden size to use for the model.",
     )
 
     parser.add_argument(
         "--data-fraction",
         type=float,
         default=1,
-        help="Subsampling of training set, in fraction (0, 1]."
+        help="Subsampling of training set, in fraction (0, 1].",
     )
     args = parser.parse_args()
 
     logger.info(f"Running text dataset {args.dataset}\n{args}")
 
     if args.output_path is None:
-        args.output_path =  (
-            Path.cwd().absolute() / 
-            "results" / 
-            f"dataset={args.dataset}" / 
-            f"seed={args.seed}"
+        args.output_path = (
+            Path.cwd().absolute()
+            / "results"
+            / f"dataset={args.dataset}"
+            / f"seed={args.seed}"
         )
     if args.data_path is None:
         args.data_path = Path.cwd().absolute() / ".data"
@@ -312,6 +315,6 @@ if __name__ == "__main__":
         lstm_emb_dim=args.lstm_emb_dim,
         lstm_hidden_dim=args.lstm_hidden_dim,
         data_fraction=args.data_fraction,
-        load_path=Path(args.load_path) if args.load_path is not None else None
+        load_path=Path(args.load_path) if args.load_path is not None else None,
     )
 # end of file

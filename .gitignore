@@ -177,9 +177,19 @@ cython_debug/
 # MacOS stuff
 **/.DS_Store
 
-data/*
+data
 
 # Whiteboard Test Predictions:
 !data/exam_dataset/
 /.automl-text-env
 /datasets
+
+.playground.ipynb
+smac3_output/
+wandb
+
+*.ignore.*
+temp-plots
+
+tokenizers/
+.model/

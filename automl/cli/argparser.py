@@ -1,0 +1,171 @@
+import argparse
+import datetime
+import uuid
+from pathlib import Path
+from typing import Optional, Any
+
+import yaml
+
+from automl.cli.types import RuntimeConfigDict
+
+DEFAULT_CONFIG: RuntimeConfigDict = {
+    "runtime_id": "",  # TODO: Not best
+    "dataset": "amazon",
+    "output_path": Path("results"),
+    "load_path": None,
+    "data_path": Path("data"),
+    "seed": int(datetime.datetime.now().timestamp() % 1e6),
+    "approach": "tfidf-ffnn",
+    "vocab_size": 1000,
+    "token_length": 128,
+    "evaluation_budget": 5,
+    "max_budget": 40,
+    "min_budget": 5,
+    "n_trials": 10,
+    "batch_size": 32,
+    "lr": 0.01,
+    "weight_decay": 0.01,
+    "lstm_emb_dim": 64,
+    "lstm_hidden_dim": 64,
+    "ffnn_hidden_layer_dim": 64,
+    "data_fraction": 1.0,
+    "enable_jsonl_history": True,
+    "num_workers": 0,
+    "max_num_rows": 40000,
+    "optimizer": "smac",
+    "max_trainers_in_memory": 10,
+}
+
+
+def create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--config", type=Path, default="runconfig.yml")
+
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        choices=["ag_news", "imdb", "amazon", "dbpedia", "yelp"],
+    )
+    parser.add_argument("--output-path", type=Path)
+    parser.add_argument("--load-path", type=Path)
+    parser.add_argument("--data-path", type=Path)
+
+    parser.add_argument("--seed", type=int)
+
+    parser.add_argument(
+        "--approach",
+        type=str,
+        choices=[
+            "tfidf-ffnn",
+            "transformer",
+            "tfidf-linear",
+            "sequence-dl",
+            "bpe-rnn",
+        ],
+    )
+
+    parser.add_argument("--vocab-size", type=int)
+    parser.add_argument("--token-length", type=int)
+
+    parser.add_argument("--evaluation-budget", type=int)
+    parser.add_argument("--max-budget", type=int)
+    parser.add_argument("--min-budget", type=int)
+    parser.add_argument("--n-trials", type=int)
+
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--lr", type=float)
+    parser.add_argument("--weight-decay", type=float)
+
+    parser.add_argument("--lstm-emb-dim", type=int)
+    parser.add_argument("--lstm-hidden-dim", type=int)
+    parser.add_argument("--ffnn-hidden-layer-dim", type=int)
+
+    parser.add_argument("--data-fraction", type=float)
+
+    parser.add_argument(
+        "--enable-jsonl-history",
+        action="store_true",
+        help="Enable writing JSONL history (overrides config to True)",
+    )
+    parser.add_argument(
+        "--disable-jsonl-history",
+        action="store_true",
+        help="Disable writing JSONL history (overrides config to False)",
+    )
+
+    parser.add_argument("--num-workers", type=int)
+    parser.add_argument("--optimizer", choices=["smac", "random", "rl_freeze_thaw"])
+
+    return parser
+
+
+def load_yaml(path: Path | str) -> dict[str, Any]:
+    path = Path(path)
+    if not path.exists():
+        return {}
+    with open(path, "r") as f:
+        return yaml.safe_load(f) or {}
+
+
+def merge_config(
+    yaml_cfg: Optional[dict[str, Any]] = None,
+    cli_args: Optional[argparse.Namespace] = None,
+    defaults: Optional[RuntimeConfigDict] = None,
+) -> RuntimeConfigDict:
+    if defaults is None:
+        defaults = DEFAULT_CONFIG
+    cfg = defaults.copy()
+
+    # 1. apply YAML
+    if yaml_cfg is not None:
+        cfg.update({k: v for k, v in yaml_cfg.items() if v is not None})
+
+    # 2. apply CLI overrides (only non-None / used flags)
+    if cli_args is not None:
+        cli_dict = vars(cli_args)
+
+        # In case the key are named different in the RuntimeConfigDict and argparse
+        key_map = {}
+
+        # handle the mutually-exclusive history flags
+        if cli_dict.get("enable_jsonl_history"):
+            cfg["enable_jsonl_history"] = True
+        if cli_dict.get("disable_jsonl_history"):
+            cfg["enable_jsonl_history"] = False
+
+        for k, v in cli_dict.items():
+            if k in ("config", "enable_jsonl_history", "disable_jsonl_history"):
+                continue
+            if v is None:
+                continue
+
+            cfg_key = key_map.get(k, k)
+            cfg[cfg_key] = v
+
+    return RuntimeConfigDict(**cfg)
+
+
+def load_runtime_config(config_path: Optional[Path | str] = None):
+    parser = create_parser()
+    args = parser.parse_args()
+
+    yaml_cfg = load_yaml(config_path or Path(args.config))
+    cfg = merge_config(yaml_cfg, args, defaults=DEFAULT_CONFIG)
+
+    if cfg["runtime_id"].strip() == "":
+        cfg["runtime_id"] = (
+            datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            + "_"
+            + uuid.uuid4().hex[:8]
+        )
+
+    cfg["output_path"] = Path(cfg["output_path"]) / cfg["dataset"] / cfg["runtime_id"]
+    cfg["output_path"].mkdir(exist_ok=True, parents=True)
+
+    cfg["data_path"] = Path(cfg["data_path"])
+    load_path = cfg["load_path"]
+    if load_path:
+        cfg["load_path"] = Path(load_path)
+
+    return cfg

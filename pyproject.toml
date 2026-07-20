@@ -12,7 +12,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.10"
+python = ">=3.10,<3.13"
 # Poetry insists on this https://github.com/python-poetry/poetry/issues/8823
 numpy = "^1.0"  # to prevent 2.0 from being installed
 toml = "^0.10.2"
@@ -22,7 +22,23 @@ pyyaml = "^6.0"          # YAML parsing
 pyarrow = ">=12.0"       # Arrow format support
 neural-pipeline-search = "0.13.0"
 datasets = ">=2.0"
-transformers =  ">=4.20"
+transformers = ">=4.20"
+black = "^26.5.1" # For formatting
+pytest = "^9.1.1" # For testing
+ipykernel = "^7.3.0"
+ipywidgets = "^8.1.8" # Just to make some jupyter warning go away
+torch = "^2.12.1"
+pandas = "^2.3.3"
+scipy-stubs = "~=1.15.3"
+configspace = "^1.2.2"
+smac = "^2.4.0"
+colorlog = "^6.10.1"
+psutil = "^7.2.2"
+py-cpuinfo = "^9.0.0"
+nvidia-ml-py = "^13.610.43"
+joblib = "^1.5.3"
+seaborn = "^0.13.2"
+filelock = "^3.29.6"
 
 
 [build-system]

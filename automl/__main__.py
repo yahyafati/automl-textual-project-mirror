@@ -1,0 +1,59 @@
+"""
+Joint search space for the TF-IDF text-classification pipeline.
+
+Run this file directly to sanity-check the space (prints a few sampled
+configs). Wiring into an actual optimizer (SMAC's MultiFidelityFacade,
+syne-tune's ASHA, etc.) is sketched at the bottom -- swap in your own
+train/eval function.
+"""
+
+from __future__ import annotations
+
+from automl.core.registry import register_all_approaches
+from .core import optimizers
+from .core.utils import timer
+from .core.utils.misc import set_seed
+from .cli import load_runtime_config, RuntimeConfigDict
+from .environment.device_info import get_device_info, save_device_info
+from .environment.save_requirements import save_requirements
+from .logger import get_logger
+
+
+def main(config: RuntimeConfigDict):
+    register_all_approaches()
+    device_info = get_device_info()
+    save_device_info(device_info, config["output_path"] / "device_info.json")
+    save_requirements(config["output_path"] / "requirements.txt")
+
+    set_seed(config["seed"])
+    optimizer_classes = {
+        "smac": optimizers.SmacOptimizer,
+        "random": optimizers.RandomSearch,
+        "ifbo": optimizers.IfboOptimizer,
+        "rl_freeze_thaw": optimizers.RLFreezeThawOptimizer,
+    }
+    optimizer_name = config.get("optimizer", "smac")
+    optimizer = optimizer_classes[optimizer_name](config)
+
+    logger.info("Starting main optimization...")
+    with timer.Timer("Main Optimization") as t:
+        optimizer.run()
+    logger.info(f"Main optimization completed in {t.formatted_execution_time}.")
+    logger.info(f"Results saved at '{config['output_path']}'")
+
+
+def run():
+    """Convenience function if this module is imported and executed programmatically."""
+    runtime_config = load_runtime_config()
+    main(runtime_config)
+
+
+if __name__ == "__main__":
+    _runtime_config = load_runtime_config()
+    logger = get_logger(
+        log_file=_runtime_config["output_path"] / "app.log",
+        force_new=True,
+    )
+    main(_runtime_config)
+else:
+    logger = get_logger()

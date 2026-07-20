@@ -4,6 +4,7 @@ import requests
 import zipfile
 import io
 
+
 def download_and_unzip_phase1(url, extract_to):
     """
     Download a zip file from the specified URL and extract its contents directly
@@ -25,10 +26,11 @@ def download_and_unzip_phase1(url, extract_to):
     os.makedirs(extract_to, exist_ok=True)
 
     # Open the zipfile from memory and extract
-    with zipfile.ZipFile(zip_bytes, 'r') as zip_ref:
+    with zipfile.ZipFile(zip_bytes, "r") as zip_ref:
         zip_ref.extractall(extract_to)
 
     print(f"Downloaded and extracted zip file from {url} to: {extract_to}")
+
 
 def download_and_unzip_phase2(url, extract_to):
     """
@@ -51,7 +53,7 @@ def download_and_unzip_phase2(url, extract_to):
     os.makedirs(extract_to, exist_ok=True)
 
     # Hardcoded for the specific structure of the zip file, extract only the "test-phase2/yelp" directory
-    with zipfile.ZipFile(zip_bytes, 'r') as zip_ref:
+    with zipfile.ZipFile(zip_bytes, "r") as zip_ref:
         for member in zip_ref.infolist():
             name = member.filename
 
@@ -73,7 +75,7 @@ def download_and_unzip_phase2(url, extract_to):
             # write file
             with zip_ref.open(member) as source, open(target_path, "wb") as target:
                 target.write(source.read())
-    
+
     print(f"Downloaded and extracted zip file from {url} to: {extract_to}")
 
 
@@ -84,6 +86,7 @@ def main():
 
     download_and_unzip_phase1(phase1_url, extract_folder)
     download_and_unzip_phase2(phase2_url, extract_folder)
+
 
 if __name__ == "__main__":
     main()
