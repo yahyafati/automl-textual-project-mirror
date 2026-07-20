@@ -80,6 +80,7 @@ class IfboOptimizer(Optimizer):
                 f"got {self.initial_epsilon}."
             )
 
+        self.use_random_selection = runtime_config.get("use_random_selection")
         # Total iFBO "steps" (each is one call to train_single_configuration)
         requested_steps: int = int(runtime_config["n_trials"])
         self.total_steps: int = max(1, requested_steps)
@@ -89,13 +90,14 @@ class IfboOptimizer(Optimizer):
 
         self.logger.info(
             "[IfboOptimizer] Initialized with dynamic candidates, budgets in [%d, %d], "
-            "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f",
+            "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f, use_random_selection=%s",
             self.min_budget,
             self.max_budget,
             self.b_max,
             self.total_steps,
             self.hp_space.dim,
             self.initial_epsilon,
+            self.use_random_selection,
         )
 
         # Load FT-PFN surrogate model
@@ -291,12 +293,6 @@ class IfboOptimizer(Optimizer):
             self.candidates.append(candidate)
             return candidate, 1
 
-        f_best = self._best_so_far_accuracy()
-
-        h_rand = self._rng.randint(1, self.b_max)
-        tau_rand = 10 ** self._rng.uniform(-4, -1)  # same scale as in ifbo_impl
-        T_rand = f_best + tau_rand * (1.0 - f_best)
-
         pending: list[_IfBOCandidate] = [
             c for c in self.candidates if c.steps_done < self.b_max
         ]
@@ -305,6 +301,16 @@ class IfboOptimizer(Optimizer):
             candidate = self._sample_new_candidate()
             self.candidates.append(candidate)
             return candidate, 1
+
+        # For baselines
+        if self.use_random_selection:
+            candidate = self._rng.choice(pending)
+            return candidate, 1
+
+        f_best = self._best_so_far_accuracy()
+        h_rand = self._rng.randint(1, self.b_max)
+        tau_rand = 10 ** self._rng.uniform(-4, -1)  # same scale as in ifbo_impl
+        T_rand = f_best + tau_rand * (1.0 - f_best)
 
         query: list[Curve] = []
         for c in pending:

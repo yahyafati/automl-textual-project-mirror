@@ -8,15 +8,17 @@ the FT-PFN surrogate.
 
 from __future__ import annotations
 
+import logging
 import math
 import random
-import warnings
 from typing import Any
 
 import torch
 
 # FT-PFN surrogate can only consume this many hyperparameter dimensions.
 MAX_HYPERPARAMETERS = 10
+
+logger = logging.getLogger()
 
 
 class HPSpec:
@@ -135,10 +137,13 @@ class HyperparameterSpace:
         # important hyperparameters first.
         all_names = list(specs.keys())
 
+        hyperparams_to_drop = ["model_type"]
+        all_names = [name for name in all_names if name not in hyperparams_to_drop]
+
         if len(all_names) > MAX_HYPERPARAMETERS:
             kept_names = all_names[:MAX_HYPERPARAMETERS]
             dropped_names = all_names[MAX_HYPERPARAMETERS:]
-            warnings.warn(
+            logger.warning(
                 f"FT-PFN surrogate supports at most {MAX_HYPERPARAMETERS} "
                 f"hyperparameters, but got {len(all_names)}. Keeping the first "
                 f"{MAX_HYPERPARAMETERS} (by priority order): {kept_names}. "

@@ -126,10 +126,6 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         num_layers = self.get_param_value("seq_num_layers")
         dropout = self.get_param_value("dropout")
         batch_size = self.get_param_value("batch_size", apply_fn=int)
-        arch = self.get_param_value("seq_arch")
-
-        if arch not in {"bilstm", "cnn"}:
-            raise ValueError(f"seq_arch must be 'bilstm' or 'cnn', got: {arch}")
 
         # Build vocab on train text
         train_texts = train.texts  # adjust column name as needed

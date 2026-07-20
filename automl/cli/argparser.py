@@ -25,6 +25,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     optimizer="smac",
     num_workers=2,
     log_level="INFO",
+    use_random_selection=False,
 )
 
 

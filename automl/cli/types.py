@@ -28,3 +28,5 @@ class RuntimeConfig(TypedDict):
     optimizer: str
 
     log_level: str
+
+    use_random_selection: bool
