@@ -122,7 +122,6 @@ class TorchTrainer(Trainer):
             step_size = scheduler_args.get("step_size", 1)
             gamma = scheduler_args.get("gamma", 0.1)
             last_epoch = scheduler_args.get("last_epoch", -1)
-            verbose = scheduler_args.get("verbose", False)
             return StepLR(
                 optimizer,
                 step_size=step_size,
@@ -140,7 +139,6 @@ class TorchTrainer(Trainer):
                 )
             eta_min = scheduler_args.get("eta_min", 0.0)
             last_epoch = scheduler_args.get("last_epoch", -1)
-            verbose = scheduler_args.get("verbose", False)
             return CosineAnnealingLR(
                 optimizer,
                 T_max=T_max,
@@ -149,12 +147,8 @@ class TorchTrainer(Trainer):
             )
 
         elif name == "exponentiallr":
-            # Allowed args: gamma (required), last_epoch=-1, verbose=False
-            if "gamma" not in scheduler_args:
-                raise ValueError("ExponentialLR requires 'gamma' in scheduler_args.")
-            gamma = scheduler_args["gamma"]
+            gamma = scheduler_args.get("gamma", 0.1)
             last_epoch = scheduler_args.get("last_epoch", -1)
-            verbose = scheduler_args.get("verbose", False)
             return ExponentialLR(
                 optimizer,
                 gamma=gamma,
@@ -172,7 +166,6 @@ class TorchTrainer(Trainer):
             cooldown = scheduler_args.get("cooldown", 0)
             min_lr = scheduler_args.get("min_lr", 0.0)
             eps = scheduler_args.get("eps", 1e-8)
-            verbose = scheduler_args.get("verbose", False)
             return ReduceLROnPlateau(
                 optimizer,
                 mode=mode,
