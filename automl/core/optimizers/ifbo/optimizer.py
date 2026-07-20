@@ -102,7 +102,7 @@ class IfboOptimizer(Optimizer):
 
         # Load FT-PFN surrogate model
         self.logger.info("[IfboOptimizer] Loading pretrained FT-PFN surrogate...")
-        self.model = FTPFN(version="0.0.1")
+        self.model = FTPFN(version="0.0.1", target_path=".model")
 
     # -------------------------
     # Public API
