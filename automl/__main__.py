@@ -9,6 +9,8 @@ train/eval function.
 
 from __future__ import annotations
 
+import logging
+
 from automl.core.registry import register_all_approaches
 from .core import optimizers
 from .core.utils import timer
@@ -16,7 +18,7 @@ from .core.utils.misc import set_seed
 from .cli import load_runtime_config, RuntimeConfig
 from .environment.device_info import get_device_info, save_device_info
 from .environment.save_requirements import save_requirements
-from .logger import get_logger
+from .logger import setup_logging
 
 
 def main(config: RuntimeConfig):
@@ -50,10 +52,11 @@ def run():
 
 if __name__ == "__main__":
     _runtime_config = load_runtime_config()
-    logger = get_logger(
-        log_file=_runtime_config["output_path"] / "app.log",
-        force_new=True,
+    setup_logging(
+        output_path=_runtime_config["output_path"] / "app.log",
+        level=_runtime_config["log_level"],
     )
+    logger = logging.getLogger()
     main(_runtime_config)
 else:
-    logger = get_logger()
+    logger = logging.getLogger()

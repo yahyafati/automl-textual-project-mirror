@@ -114,3 +114,39 @@ def get_logger(
 
     _LOGGERS[name] = logger
     return logger
+
+
+def setup_logging(
+    output_path: Optional[str | Path] = None,
+    level: int | str = logging.INFO,
+) -> logging.Logger:
+    """Configure application logging for stdout and an optional log file.
+
+    Some modules create their logger at import time via ``get_logger()``. This
+    function reconfigures those cached loggers as well, so the configured log
+    level and log file apply consistently after CLI startup.
+    """
+    if isinstance(level, str):
+        resolved_level = logging.getLevelName(level.upper())
+        if not isinstance(resolved_level, int):
+            raise ValueError(f"Invalid log level: {level}")
+    else:
+        resolved_level = level
+
+    logger_names = set(_LOGGERS) | {""}
+    configured_root = get_logger(
+        name="",
+        log_file=output_path,
+        level=resolved_level,
+        force_new=True,
+    )
+
+    for logger_name in logger_names - {""}:
+        get_logger(
+            name=logger_name,
+            log_file=output_path,
+            level=resolved_level,
+            force_new=True,
+        )
+
+    return configured_root

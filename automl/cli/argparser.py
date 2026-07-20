@@ -25,6 +25,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     optimizer="smac",
     max_trainers_in_memory=10,
     num_workers=2,
+    log_level="INFO",
 )
 
 
@@ -88,6 +89,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--num-workers", type=int)
     parser.add_argument("--optimizer", choices=["smac", "random", "rl_freeze_thaw"])
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
 
     return parser
 

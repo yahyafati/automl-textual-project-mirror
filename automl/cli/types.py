@@ -27,3 +27,5 @@ class RuntimeConfig(TypedDict):
     num_workers: int
     optimizer: str
     max_trainers_in_memory: int
+
+    log_level: str
