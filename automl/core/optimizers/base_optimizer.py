@@ -29,6 +29,7 @@ from automl.core.utils.misc import (
 )
 from automl.cli import RuntimeConfig
 from automl.logger import get_logger
+from automl.trial_plots import save_all_plots
 
 
 class Optimizer(ABC):
@@ -145,32 +146,7 @@ class Optimizer(ABC):
             self.logger.debug("No history to plot.")
             return
         self.logger.debug("Saving plot images...")
-        with open(self.history_file_path, "w") as writer:
-            json.dump(
-                self.history,
-                writer,
-                indent=4,
-                default=numpy_and_config_encoder,
-            )
-
-        plot_learning_curves(
-            self.history,
-            self.output_path / "learning_curves.png",
-        )
-        plot_optimization_history(
-            self.history,
-            self.output_path / "optimization_history.png",
-        )
-
-        plot_budget_vs_performance(
-            self.history,
-            save_path=self.output_path / "budget_vs_performance.png",
-        )
-
-        plot_epoch_heatmap(
-            self.history,
-            save_path=self.output_path / "epoch_heatmap.png",
-        )
+        save_all_plots(self.history, outdir=self.output_path)
 
         self.logger.info("Plot images saved.")
 
@@ -299,9 +275,10 @@ class Optimizer(ABC):
             execution_time = t.execution_time
             val_error = 1.0 - result["val_accuracy"]
 
-            if budget > self.highest_budget_seen:
-                self.highest_budget_seen = budget
-                self.best_val_error = float("inf")
+            # TODO: Maybe we don't need this
+            # if budget > self.highest_budget_seen:
+            #     self.highest_budget_seen = budget
+            #     self.best_val_error = float("inf")
 
             is_best_yet = (
                 budget >= self.highest_budget_seen and val_error < self.best_val_error
