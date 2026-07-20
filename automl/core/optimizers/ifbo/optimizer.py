@@ -178,14 +178,20 @@ class IfboOptimizer(Optimizer):
         return cand
 
     def _epsilon(self, completed_trials: int) -> float:
-        """
+        r"""
         Decaying exploration probability.
 
         completed_trials is the number of already executed calls to
         train_single_configuration. With the default initial_epsilon=1.0 this
         yields 1.0, 0.5, 0.333..., ... for completed_trials 0, 1, 2, ...
+
+        Polynomial Decay:
+        e_t = e_min + (e_0 - e_min) * (1 - t/T)^p
         """
-        return self.initial_epsilon - completed_trials / self.total_steps
+        eps_min = 0.05
+        p = 2.0
+        frac = completed_trials / self.total_steps
+        return eps_min + (self.initial_epsilon - eps_min) * (1 - frac) ** p
 
     def _build_context(self) -> list[Curve]:
         """
