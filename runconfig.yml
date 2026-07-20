@@ -1,4 +1,4 @@
-dataset: dbpedia
+dataset: imdb
 output_path: results
 load_path: null
 data_path: data

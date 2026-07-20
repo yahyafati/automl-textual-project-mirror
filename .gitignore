@@ -193,3 +193,5 @@ temp-plots
 
 tokenizers/
 .model/
+
+runconfig.local.yml
