@@ -38,6 +38,9 @@ class TransformerTrainer(Trainer):
         self.num_epochs = num_epochs
         self.max_grad_norm = max_grad_norm
         self.criterion = nn.CrossEntropyLoss()
+        self.start_epoch = 0
+        self.best_val_acc = 0.0
+        self._current_epoch = 0
 
         logger.info(
             f"[TransformerTrainer] Initialized for approach='{approach_name}' "
@@ -59,8 +62,12 @@ class TransformerTrainer(Trainer):
             )
             self.load(load_path)
 
-        best_val_acc = 0.0
-        best_state_dict = None
+        best_val_acc = self.best_val_acc
+        best_state_dict = (
+            {k: v.cpu() for k, v in self.model.state_dict().items()}
+            if best_val_acc > 0.0
+            else None
+        )
 
         total_train_batches = len(self.train_loader)
         logger.debug(
@@ -68,7 +75,9 @@ class TransformerTrainer(Trainer):
             f"batches per epoch={total_train_batches}"
         )
 
-        for epoch in range(1, self.num_epochs + 1):
+        for epoch_idx in range(self.start_epoch, self.num_epochs):
+            epoch = epoch_idx + 1
+            self._current_epoch = epoch_idx
             logger.info(
                 f"[TransformerTrainer] ===== Epoch {epoch}/{self.num_epochs} START ====="
             )
@@ -161,6 +170,8 @@ class TransformerTrainer(Trainer):
                 f"[TransformerTrainer] ===== Epoch {epoch}/{self.num_epochs} END ====="
             )
 
+        self.best_val_acc = best_val_acc
+
         if best_state_dict is not None:
             logger.info(
                 "[TransformerTrainer] Loading best model state dict "
@@ -227,8 +238,21 @@ class TransformerTrainer(Trainer):
             f"(extra_kwargs={list(kwargs.keys()) if kwargs else []})."
         )
         path.parent.mkdir(parents=True, exist_ok=True)
+        epoch = max(
+            self.start_epoch,
+            self._current_epoch + 1 if self._history else 0,
+        )
         state = {
-            "model_state_dict": self.model.state_dict(),
+            "model_state_dict": {
+                k: v.cpu() for k, v in self.model.state_dict().items()
+            },
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "scheduler_state_dict": (
+                self.scheduler.state_dict() if self.scheduler is not None else None
+            ),
+            "epoch": epoch,
+            "best_val_acc": self.best_val_acc,
+            "history": self._history,
         }
         torch.save(state, path)
         logger.info(f"[TransformerTrainer] Saved model checkpoint to {path}")
@@ -237,4 +261,11 @@ class TransformerTrainer(Trainer):
         logger.info(f"[TransformerTrainer] Loading model checkpoint from {path}")
         state = torch.load(path, map_location=self.device)
         self.model.load_state_dict(state["model_state_dict"])
+        if "optimizer_state_dict" in state:
+            self.optimizer.load_state_dict(state["optimizer_state_dict"])
+        if self.scheduler is not None and state.get("scheduler_state_dict") is not None:
+            self.scheduler.load_state_dict(state["scheduler_state_dict"])
+        self.start_epoch = state.get("epoch", 0)
+        self.best_val_acc = state.get("best_val_acc", 0.0)
+        self._history = state.get("history", [])
         logger.info(f"[TransformerTrainer] Loaded model checkpoint from {path}")

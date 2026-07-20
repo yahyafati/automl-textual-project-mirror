@@ -33,11 +33,20 @@ class SklearnTrainer(Trainer):
         self.classes_ = np.unique(y_train)
 
     def load(self, path: Optional[Path]) -> None:
-        if path and path.exists():
+        if path is None:
             logger.debug("No load path provided. Training from scratch.")
-            checkpoint = joblib.load(path)
-            self.model = checkpoint["model"]
-            self.best_val_acc = checkpoint["best_val_acc"]
+            return
+
+        if not path.exists():
+            logger.warning(
+                f"Checkpoint file not found at {path}. Training from scratch."
+            )
+            return
+
+        checkpoint = joblib.load(path)
+        self.model = checkpoint["model"]
+        self.best_val_acc = checkpoint["best_val_acc"]
+        self._history = checkpoint.get("history", [])
 
     def save(self, path: Path, **kwargs) -> None:
         if path is None:
@@ -47,6 +56,7 @@ class SklearnTrainer(Trainer):
         checkpoint = {
             "model": self.model,
             "best_val_acc": self.best_val_acc,
+            "history": self._history,
         }
 
         joblib.dump(checkpoint, path)

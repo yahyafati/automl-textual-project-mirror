@@ -1,7 +1,8 @@
 import json
-import random
+import hashlib
 from abc import ABC, abstractmethod
 from datetime import datetime
+from pathlib import Path
 from typing import Union, Optional
 
 from ConfigSpace import Configuration, ConfigurationSpace
@@ -66,8 +67,8 @@ class Optimizer(ABC):
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.trial_no: int = 0
 
-        self.trained_configs: dict[str, Trainer] = {}
-        self.trained_config_scores: dict[str, float] = {}
+        self.trainer_checkpoint_dir = self.checkpoint_dir / "trainers"
+        self.trainer_checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         register_all_approaches()
         set_seed(runtime_config["seed"])
@@ -175,39 +176,47 @@ class Optimizer(ABC):
 
     @staticmethod
     def _config_to_hash_id(config: Configuration) -> str:
-        return hex(hash(str(config)))
+        config_payload = json.dumps(dict(config), sort_keys=True, default=str)
+        return hashlib.sha256(config_payload.encode("utf-8")).hexdigest()[:16]
 
-    def _keep_top_inmemory_trainers(self) -> None:
+    def _trainer_checkpoint_path(self, config_id: str) -> Path:
+        return self.trainer_checkpoint_dir / config_id / "trainer.pth"
+
+    def _trainer_load_kwargs(self, checkpoint_path: Path) -> dict[str, Path]:
         """
-        Keep only the best in-memory trainers by validation accuracy.
+        Return load kwargs understood by the concrete approaches.
 
-        `trained_configs` stores live trainer objects so a configuration can be
-        resumed in freeze-thaw style optimization. Without pruning this can keep
-        many PyTorch models in memory. Scores are recorded immediately after
-        training from result["val_accuracy"].
+        Some approaches call the trainer checkpoint argument `load_path`, while
+        others call it `trainer_load_path`. Concrete approaches accept
+        additional kwargs, so passing both keeps this optimizer independent of
+        those implementation details.
         """
-        n_max_inmemory_trainers = self.runtime_config["max_trainers_in_memory"]
-        if len(self.trained_configs) <= n_max_inmemory_trainers:
-            return
+        if not checkpoint_path.exists():
+            return {}
 
-        top_config_ids = {
-            config_id
-            for config_id, _ in sorted(
-                self.trained_config_scores.items(),
-                key=lambda item: item[1],
-                reverse=True,
-            )[:n_max_inmemory_trainers]
+        self.logger.info(
+            f"[{self.__class__.__name__}] Loading trainer checkpoint from {checkpoint_path}"
+        )
+        return {
+            "load_path": checkpoint_path,
+            "trainer_load_path": checkpoint_path,
         }
 
-        dropped_config_ids = set(self.trained_configs) - top_config_ids
-        for config_id in dropped_config_ids:
-            self.trained_configs.pop(config_id, None)
-            self.trained_config_scores.pop(config_id, None)
+    def _save_trainer_checkpoint(
+        self, config_id: str, trainer: Optional[Trainer]
+    ) -> None:
+        if trainer is None:
+            self.logger.warning(
+                f"[{self.__class__.__name__}] No trainer available to checkpoint "
+                f"for config {config_id}."
+            )
+            return
 
+        checkpoint_path = self._trainer_checkpoint_path(config_id)
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        trainer.save(checkpoint_path)
         self.logger.debug(
-            "Pruned in-memory trainers to top %d by val_accuracy; dropped %d.",
-            n_max_inmemory_trainers,
-            len(dropped_config_ids),
+            f"[{self.__class__.__name__}] Saved trainer checkpoint to {checkpoint_path}"
         )
 
     def train_single_configuration(
@@ -277,19 +286,16 @@ class Optimizer(ABC):
                 num_workers=self.runtime_config["num_workers"],
             )
 
-            if config_id in self.trained_configs:
-                self.logger.info(
-                    f"[{self.__class__.__name__}] Loading pre-trained model for config {config_id}"
-                )
-                approach.trainer = self.trained_configs[config_id]
-
             with timer.Timer() as t:
                 with approach.with_mode("train") as _approach:
                     prepared_result = _approach.prepare(train_split, val_split)
-                    result = _approach.train(prepared_result, epochs=int(budget))
-                    self.trained_configs[config_id] = _approach.trainer  # type: ignore
-                    self.trained_config_scores[config_id] = result["val_accuracy"]
-                    self._keep_top_inmemory_trainers()
+                    trainer_checkpoint_path = self._trainer_checkpoint_path(config_id)
+                    result = _approach.train(
+                        prepared_result,
+                        epochs=int(budget),
+                        **self._trainer_load_kwargs(trainer_checkpoint_path),
+                    )
+                    self._save_trainer_checkpoint(config_id, _approach.trainer)
             execution_time = t.execution_time
             val_error = 1.0 - result["val_accuracy"]
 
@@ -349,13 +355,18 @@ class Optimizer(ABC):
         self.logger.info(
             f"[{self.__class__.__name__}] Retraining incumbent on full train data (epochs={epochs})..."
         )
-        model_type: ApproachName = incumbent.get("model_type") # type: ignore
+        model_type: ApproachName = incumbent.get("model_type")  # type: ignore
 
         data_info = self.dataset.create_dataloaders(
             val_size=0.0,
             random_state=self.runtime_config["seed"],
         )
         train_df, test_df = data_info["train_df"], data_info["test_df"]
+
+        # log size of train and test
+        self.logger.info(
+            f"[{self.__class__.__name__}] Train size: {len(train_df)}, Test size: {len(test_df)}"
+        )
 
         train_split = DatasetSplit(
             texts=train_df["text"].tolist(),

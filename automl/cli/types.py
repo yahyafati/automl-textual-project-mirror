@@ -26,6 +26,5 @@ class RuntimeConfig(TypedDict):
     enable_jsonl_history: bool
     num_workers: int
     optimizer: str
-    max_trainers_in_memory: int
 
     log_level: str

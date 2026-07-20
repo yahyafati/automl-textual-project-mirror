@@ -391,7 +391,8 @@ class TransformerApproach(
         self.trainer = trainer
 
         logger.debug(f"[{self.name}] Starting training routine in TransformerTrainer.")
-        result = trainer.train()
+        trainer_load_path = kwargs.get("load_path") or kwargs.get("trainer_load_path")
+        result = trainer.train(load_path=trainer_load_path)
         logger.info(f"[{self.name}] Training routine finished.")
         logger.debug(
             f"[{self.name}] TrainResult summary: "

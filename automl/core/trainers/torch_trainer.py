@@ -232,6 +232,7 @@ class TorchTrainer(Trainer):
         self.start_epoch = checkpoint["epoch"]
         self.best_val_acc = checkpoint["best_val_acc"]
         self.approach_name = checkpoint["approach_name"]
+        self._history = checkpoint.get("history", [])
         self.optimizer = self.create_optimizer(
             self.model,
             checkpoint["optimizer"]["name"],
@@ -260,7 +261,10 @@ class TorchTrainer(Trainer):
             logger.debug("No save path provided. Skipping checkpoint saving.")
             return
 
-        epoch = self._current_epoch
+        epoch = max(
+            self.start_epoch,
+            self._current_epoch + 1 if self._history else 0,
+        )
         model_state_dict = {k: v.cpu() for k, v in self.model.state_dict().items()}
         optimizer_state_dict = self.optimizer.state_dict()
         checkpoint = {
@@ -273,6 +277,7 @@ class TorchTrainer(Trainer):
             "epoch": epoch,
             "best_val_acc": self.best_val_acc,
             "approach_name": self.approach_name,
+            "history": self._history,
         }
 
         if self.scheduler is not None:

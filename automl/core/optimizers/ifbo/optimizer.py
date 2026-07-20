@@ -218,7 +218,7 @@ class IfboOptimizer(Optimizer):
         - Train for the corresponding epoch budget
         - Record normalized time t and performance y (accuracy) for FT-PFN
         """
-        cand.steps_done += step
+        cand.steps_done = min(cand.steps_done + step, self.b_max)
         budget = self._step_to_budget(cand.steps_done)
 
         # Derive a seed for this evaluation (for reproducibility yet variability)

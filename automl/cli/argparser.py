@@ -23,7 +23,6 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     enable_jsonl_history=True,
     max_num_rows=40_000,
     optimizer="smac",
-    max_trainers_in_memory=10,
     num_workers=2,
     log_level="INFO",
 )
