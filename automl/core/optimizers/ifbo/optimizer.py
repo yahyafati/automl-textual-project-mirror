@@ -140,7 +140,8 @@ class IfboOptimizer(Optimizer):
     # Internal helpers
     # -------------------------
 
-    def _build_hp_space(self, cs: ConfigurationSpace) -> HyperparameterSpace:
+    @staticmethod
+    def _build_hp_space(cs: ConfigurationSpace) -> HyperparameterSpace:
         """
         Build a HyperparameterSpace encoder from a ConfigSpace.
         Constant hyperparameters are ignored (do not contribute a dimension).
@@ -210,14 +211,14 @@ class IfboOptimizer(Optimizer):
             )
         return self.min_budget + step - 1
 
-    def _step(self, cand: _IfBOCandidate) -> None:
+    def _step(self, cand: _IfBOCandidate, step: int = 1) -> None:
         """
         Thaw `cand` for exactly one more freeze-thaw step:
         - Increase its step counter
         - Train for the corresponding epoch budget
         - Record normalized time t and performance y (accuracy) for FT-PFN
         """
-        cand.steps_done += 1
+        cand.steps_done += step
         budget = self._step_to_budget(cand.steps_done)
 
         # Derive a seed for this evaluation (for reproducibility yet variability)
@@ -247,7 +248,9 @@ class IfboOptimizer(Optimizer):
                     ys.append(y)
         return max(ys) if ys else 0.0
 
-    def _select_next_candidate(self, context: list[Curve]) -> _IfBOCandidate:
+    def _select_next_candidate(
+        self, context: list[Curve]
+    ) -> tuple[_IfBOCandidate, int]:
         """
         MFPI-random acquisition, adapted from ifbo_impl.py:
 
@@ -272,7 +275,7 @@ class IfboOptimizer(Optimizer):
             self.logger.warning(
                 "[IfboOptimizer] No pending candidates (all reached max steps)."
             )
-            return self._select_incumbent_candidate()
+            return self._select_incumbent_candidate(), 1
 
         query: list[Curve] = []
         for c in pending:
@@ -291,7 +294,7 @@ class IfboOptimizer(Optimizer):
 
         # TODO: We can sample here instead of doing it greedily
         best_idx = int(torch.argmax(pi_scores))
-        return pending[best_idx]
+        return pending[best_idx], h_rand
 
     def _select_incumbent_candidate(self) -> _IfBOCandidate:
         """
@@ -331,7 +334,7 @@ class IfboOptimizer(Optimizer):
 
         while used_steps < self.total_steps:
             context = self._build_context()
-            next_cand = self._select_next_candidate(context)
+            next_cand, h_rand = self._select_next_candidate(context)
             # If all have reached max steps, _select_next_candidate returns
             # the current best; don't advance further.
             if next_cand.steps_done >= self.b_max:
@@ -342,7 +345,7 @@ class IfboOptimizer(Optimizer):
                 )
                 break
 
-            self._step(next_cand)
+            self._step(next_cand, h_rand)
             used_steps += 1
 
             if used_steps % 25 == 0 or used_steps == self.total_steps:

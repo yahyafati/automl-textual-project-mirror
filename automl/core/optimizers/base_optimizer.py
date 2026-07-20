@@ -1,4 +1,5 @@
 import json
+import random
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Union, Optional
@@ -17,7 +18,7 @@ from automl.core.plot_history import (
     plot_epoch_heatmap,
 )
 from automl.core.registry import get_approach, register_all_approaches
-from automl.core.types import DatasetSplit, TrialResult
+from automl.core.types import DatasetSplit, TrialResult, ApproachName
 from automl.core.utils.misc import SavedIncumbent
 from automl.core.utils.misc import (
     get_device,
@@ -185,8 +186,8 @@ class Optimizer(ABC):
         many PyTorch models in memory. Scores are recorded immediately after
         training from result["val_accuracy"].
         """
-        N_MAX_INMEMORY_TRAINERS = self.runtime_config["max_trainers_in_memory"]
-        if len(self.trained_configs) <= N_MAX_INMEMORY_TRAINERS:
+        n_max_inmemory_trainers = self.runtime_config["max_trainers_in_memory"]
+        if len(self.trained_configs) <= n_max_inmemory_trainers:
             return
 
         top_config_ids = {
@@ -195,7 +196,7 @@ class Optimizer(ABC):
                 self.trained_config_scores.items(),
                 key=lambda item: item[1],
                 reverse=True,
-            )[:N_MAX_INMEMORY_TRAINERS]
+            )[:n_max_inmemory_trainers]
         }
 
         dropped_config_ids = set(self.trained_configs) - top_config_ids
@@ -205,7 +206,7 @@ class Optimizer(ABC):
 
         self.logger.debug(
             "Pruned in-memory trainers to top %d by val_accuracy; dropped %d.",
-            N_MAX_INMEMORY_TRAINERS,
+            n_max_inmemory_trainers,
             len(dropped_config_ids),
         )
 
@@ -231,12 +232,7 @@ class Optimizer(ABC):
         config_dict["epochs"] = int(budget)
         self.trial_no += 1
 
-        train_fraction = 0.4 + 0.6 * round(
-            (budget - self.min_budget) / (self.max_budget - self.min_budget),
-            3,
-        )
-        # Ensure minimum training fraction
-        clipped_train_fraction = min(1.0, max(0.2, train_fraction))
+        train_fraction = 1.0
         max_num_rows = int(self.runtime_config["max_num_rows"])
 
         try:
@@ -246,7 +242,7 @@ class Optimizer(ABC):
                 f"{self.runtime_config['n_trials']}, "
                 f"Config ID: {config_id}, "
                 f"Budget: {budget}, "
-                f"Train Fraction: {clipped_train_fraction:.2f} {' - clipped' if clipped_train_fraction != train_fraction else ''}, "
+                f"Train Fraction: {train_fraction:.2f}, "
                 f"Seed: {seed}, "
                 f"Approach: {model_type}"
             )
@@ -255,7 +251,7 @@ class Optimizer(ABC):
             data_info = self.dataset.create_dataloaders(
                 val_size=val_size,
                 random_state=seed,
-                train_fraction=clipped_train_fraction,
+                train_fraction=train_fraction,
                 max_num_rows=max_num_rows,
             )
             train_df, val_df = data_info["train_df"], data_info["val_df"]
@@ -353,7 +349,7 @@ class Optimizer(ABC):
         self.logger.info(
             f"[{self.__class__.__name__}] Retraining incumbent on full train data (epochs={epochs})..."
         )
-        model_type = incumbent.get("model_type")
+        model_type: ApproachName = incumbent.get("model_type") # type: ignore
 
         data_info = self.dataset.create_dataloaders(
             val_size=0.0,
