@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from typing import Optional
 
 from ConfigSpace import (
@@ -11,84 +12,13 @@ from ConfigSpace import (
     InCondition,
     ForbiddenLessThanRelation,
 )
+from ConfigSpace.conditions import Condition
+from ConfigSpace.hyperparameters import Hyperparameter
 
 from automl.core import registry
 from automl.logger import get_logger
 
 logger = get_logger()
-
-
-def build_sequence_dl_config_space(seed: int = 42) -> ConfigurationSpace:
-    cs = ConfigurationSpace(seed=seed)
-
-    # Architecture: BiLSTM or CNN
-    seq_arch = Categorical("seq_arch", ["bilstm", "cnn"], default="bilstm")
-
-    # Shared sequence-DL hyperparameters
-    seq_embed_dim = Integer("seq_embed_dim", (32, 512), default=128, log=True)
-    seq_num_layers = Integer("seq_num_layers", (1, 3), default=1)
-    hidden_dim = Integer("hidden_dim", (32, 512), default=128, log=True)
-    dropout = Float("dropout", (0.0, 0.5), default=0.1)
-
-    # Data-related
-    vocab_size = Integer("vocab_size", (1_000, 50_000), default=10_000, log=True)
-    max_seq_length = Integer("max_seq_length", (64, 256), default=128)
-
-    # CNN-specific: filters and kernel-size pattern
-    seq_num_filters = Integer("seq_num_filters", (50, 300), default=100, log=True)
-
-    # Single parameter for kernel size combinations
-    # Each choice encodes which kernel sizes (3, 4, 5) are active.
-    # You can map this back to booleans when building the model.
-    seq_kernel_pattern = Categorical(
-        "seq_kernel_pattern",
-        [
-            "3",
-            "4",
-            "5",
-            "3,4",
-            "3,5",
-            "4,5",
-            "3,4,5",
-        ],
-        default="3,4,5",
-    )
-
-    # Optimizer / training hyperparameters
-    learning_rate = Float("learning_rate", (1e-4, 1e-1), default=1e-3, log=True)
-    optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adam")
-    weight_decay = Float("weight_decay", (1e-6, 1e-2), default=1e-5, log=True)
-    batch_size = Categorical("batch_size", [32, 64, 128, 256], default=64)
-    scheduler = Categorical(
-        "scheduler",
-        ["steplr", "cosineannealinglr", "exponentiallr", "reducelronplateau"],
-        default="steplr",
-    )
-    scheduler_step_size = Integer("scheduler_step_size", (1, 10), default=5)
-    scheduler_gamma = Float("scheduler_gamma", (0.1, 0.9), default=0.1)
-
-    cs.add(
-        [
-            # seq_arch,
-            # seq_embed_dim,
-            # seq_num_layers,
-            hidden_dim,
-            dropout,
-            vocab_size,
-            # max_seq_length,
-            seq_num_filters,
-            seq_kernel_pattern,
-            learning_rate,
-            optimizer,
-            weight_decay,
-            batch_size,
-            # scheduler,
-            # scheduler_step_size,
-            # scheduler_gamma,
-        ]
-    )
-
-    return cs
 
 
 def build_config_space(
@@ -102,15 +32,11 @@ def build_config_space(
     all_model_types = list(registry.register_all_approaches())
     if not all_model_types:
         logger.warning("No valid model types found.")
-    # ["tfidf-ffnn", "tfidf-linear", "transformer"]
 
+    model_type: Hyperparameter
     if fixed_model_type is None:
         logger.info("No fixed model type specified.")
-        model_type = Categorical(
-            "model_type",
-            all_model_types,
-            default="tfidf-ffnn",
-        )
+        model_type = Categorical("model_type", all_model_types, default="tfidf-ffnn")
         allowed_model_types = set(all_model_types)
     else:
         logger.info(f"Fixed model type specified: {fixed_model_type}")
@@ -118,17 +44,13 @@ def build_config_space(
             logger.error(f"Unknown model_type: {fixed_model_type}")
             raise ValueError(f"Unknown model_type: {fixed_model_type}")
         model_type = Categorical(
-            "model_type",
-            [fixed_model_type],
-            default=fixed_model_type,
+            "model_type", [fixed_model_type], default=fixed_model_type
         )
         allowed_model_types = {fixed_model_type}
 
     # This is only really used by the TF-IDF approaches
     representation = Categorical(
-        "representation",
-        ["word", "char", "hybrid"],
-        default="word",
+        "representation", ["word", "char", "hybrid"], default="word"
     )
 
     # --- representation hyperparameters (for TF-IDF models) ---
@@ -140,7 +62,7 @@ def build_config_space(
     max_df = Float("max_df", (0.7, 1.0), default=0.8)
     sublinear_tf = Categorical("sublinear_tf", [True, False], default=True)
 
-    # --- FFNN-only + BPE-RNN hyperparameters ---
+    # --- NN ---
     hidden_dim = Integer("hidden_dim", (32, 512), default=128, log=True)
     dropout = Float("dropout", (0.0, 0.5), default=0.1)
     learning_rate = Float("learning_rate", (1e-4, 1e-1), default=1e-3, log=True)
@@ -150,29 +72,19 @@ def build_config_space(
         ["steplr", "cosineannealinglr", "exponentiallr", "reducelronplateau"],
         default="steplr",
     )
-    scheduler_step_size = Integer("scheduler_step_size", (1, 10), default=5)
-    scheduler_gamma = Float("scheduler_gamma", (0.1, 0.9), default=0.1)
     weight_decay = Float("weight_decay", (1e-6, 1e-2), default=1e-5, log=True)
     batch_size = Categorical("batch_size", [32, 64, 128, 256], default=64)
 
-    # Optimizer-specific hyperparameters
-    momentum = Float("momentum", bounds=(0.0, 0.99), default=0.9)
-    beta1 = Float("beta1", bounds=(0.8, 0.999), default=0.9)
-    beta2 = Float("beta2", bounds=(0.9, 0.9999), default=0.999)
-
     # --- linear-only hyperparameters ---
     alpha = Float("alpha", (1e-6, 1e-1), default=1e-4, log=True)
+    max_seq_length = Integer("max_seq_length", (64, 256), default=128)
 
     # --- transformer-only hyperparameters ---
     transformer_model_name = Categorical(
         "transformer_model_name",
-        [
-            "distilbert-base-uncased",
-            "bert-base-uncased",
-        ],
+        ["distilbert-base-uncased", "bert-base-uncased"],
         default="distilbert-base-uncased",
     )
-    max_seq_length = Integer("max_seq_length", (64, 256), default=128)
     transformer_learning_rate = Float(
         "transformer_learning_rate",
         (1e-6, 5e-5),
@@ -198,13 +110,19 @@ def build_config_space(
 
     # CNN-specific
     seq_num_filters = Integer("seq_num_filters", (50, 300), default=100, log=True)
-    seq_kernel_size_3 = Categorical("seq_kernel_size_3", [True, False], default=True)
-    seq_kernel_size_4 = Categorical("seq_kernel_size_4", [True, False], default=True)
-    seq_kernel_size_5 = Categorical("seq_kernel_size_5", [True, False], default=True)
+    kernel_possibilities = ["3", "4", "5"]
+    combinations = [
+        ",".join(combo)
+        for i in range(1, len(kernel_possibilities) + 1)
+        for combo in itertools.combinations(kernel_possibilities, i)
+    ]
+    print(combinations)
+    seq_kernel_pattern = Categorical(
+        "seq_kernel_pattern", combinations, default=",".join(kernel_possibilities)
+    )
 
     # --- cross-cutting ---
     class_balance = Categorical("class_balance", [True, False], default=False)
-    seed_hp = Integer("seed", (0, 2**16), default=42)
 
     # --- BPE-RNN (byte-level BPE + RNN) hyperparameters ---
     bpe_vocab_size = Integer(
@@ -243,32 +161,51 @@ def build_config_space(
     cs.add(
         [
             model_type,
-            representation,
-            vocab_size,
-            ngram_max,
-            char_ngram_min,
-            char_ngram_max,
-            min_df,
-            max_df,
-            sublinear_tf,
-            hidden_dim,
-            dropout,
-            learning_rate,
-            optimizer,
-            max_seq_length,
-            scheduler,
-            scheduler_step_size,
-            scheduler_gamma,
-            weight_decay,
+            max_seq_length,  # sequence-dl and transformer only
+            weight_decay,  # sequence-dl and transformer only
             batch_size,
-            alpha,
             class_balance,
-            seed_hp,
-            momentum,
-            beta1,
-            beta2,
         ]
     )
+
+    conditions: list[Condition] = []
+
+    if any(
+        [_allowed_model.startswith("tfidf") for _allowed_model in allowed_model_types]
+    ):
+        cs.add(
+            [
+                representation,
+                vocab_size,
+                ngram_max,
+                char_ngram_min,
+                char_ngram_max,
+                min_df,
+                max_df,
+                sublinear_tf,
+                alpha,
+            ]
+        )
+
+        conditions += [
+            # Representation-specific for TF-IDF models
+            # InCondition(representation, model_type, ["tfidf-ffnn", "tfidf-linear"]),
+            InCondition(vocab_size, model_type, ["tfidf-ffnn", "tfidf-linear"]),
+            InCondition(ngram_max, representation, ["word", "hybrid"]),
+            InCondition(char_ngram_min, representation, ["char", "hybrid"]),
+            InCondition(char_ngram_max, representation, ["char", "hybrid"]),
+        ]
+
+        # Linear branch
+        if "tfidf-linear" in allowed_model_types:
+            conditions.append(EqualsCondition(alpha, model_type, "tfidf-linear"))
+
+        cs.add(
+            [
+                ForbiddenLessThanRelation(char_ngram_max, char_ngram_min),
+                ForbiddenLessThanRelation(max_df, min_df),
+            ]
+        )
 
     if "transformer" in allowed_model_types:
         cs.add(
@@ -288,9 +225,7 @@ def build_config_space(
                 seq_num_layers,
                 seq_arch,
                 seq_num_filters,
-                seq_kernel_size_3,
-                seq_kernel_size_4,
-                seq_kernel_size_5,
+                seq_kernel_pattern,
             ]
         )
 
@@ -307,43 +242,32 @@ def build_config_space(
             ]
         )
 
-    # --- conditionals: only sample/apply a hyperparameter when it's relevant ---
-    conditions = [
-        # Representation-specific for TF-IDF models
-        # InCondition(representation, model_type, ["tfidf-ffnn", "tfidf-linear"]),
-        InCondition(ngram_max, representation, ["word", "hybrid"]),
-        InCondition(char_ngram_min, representation, ["char", "hybrid"]),
-        InCondition(char_ngram_max, representation, ["char", "hybrid"]),
-        # Optimizer-specific hyperparameters (always valid; parent is 'optimizer')
-        EqualsCondition(momentum, optimizer, "sgd"),
-        InCondition(beta1, optimizer, ["adam", "adamw"]),
-        InCondition(beta2, optimizer, ["adam", "adamw"]),
-    ]
-
     # FFNN + BPE-RNN branch (shared hyperparameters)
     ffnn_like_models = [
         m for m in ["tfidf-ffnn", "bpe-rnn", "sequence-dl"] if m in allowed_model_types
     ]
     if ffnn_like_models:
+        cs.add(
+            [
+                hidden_dim,
+                dropout,
+                learning_rate,
+                optimizer,
+                scheduler,
+            ]
+        )
         conditions.extend(
             [
-                InCondition(vocab_size, model_type, ffnn_like_models),
                 InCondition(max_seq_length, model_type, ffnn_like_models),
                 InCondition(hidden_dim, model_type, ffnn_like_models),
                 InCondition(dropout, model_type, ffnn_like_models),
                 InCondition(learning_rate, model_type, ffnn_like_models),
                 InCondition(optimizer, model_type, ffnn_like_models),
-                InCondition(scheduler, model_type, ffnn_like_models),
-                InCondition(scheduler_step_size, scheduler, ["steplr"]),
-                InCondition(scheduler_gamma, scheduler, ["exponentiallr"]),
                 InCondition(weight_decay, model_type, ffnn_like_models),
                 InCondition(batch_size, model_type, ffnn_like_models),
+                InCondition(scheduler, model_type, ffnn_like_models),
             ]
         )
-
-    # Linear branch
-    if "tfidf-linear" in allowed_model_types:
-        conditions.append(EqualsCondition(alpha, model_type, "tfidf-linear"))
 
     # Transformer branch
     if "transformer" in allowed_model_types:
@@ -367,9 +291,7 @@ def build_config_space(
                 EqualsCondition(seq_arch, model_type, "sequence-dl"),
                 EqualsCondition(seq_arch, model_type, "sequence-dl"),
                 EqualsCondition(seq_num_filters, seq_arch, "cnn"),
-                EqualsCondition(seq_kernel_size_3, seq_arch, "cnn"),
-                EqualsCondition(seq_kernel_size_4, seq_arch, "cnn"),
-                EqualsCondition(seq_kernel_size_5, seq_arch, "cnn"),
+                EqualsCondition(seq_kernel_pattern, seq_arch, "cnn"),
             ]
         )
 
@@ -388,11 +310,4 @@ def build_config_space(
 
     cs.add(conditions)
 
-    # --- forbidden: ---
-    cs.add(
-        [
-            ForbiddenLessThanRelation(char_ngram_max, char_ngram_min),
-            ForbiddenLessThanRelation(max_df, min_df),
-        ]
-    )
     return cs

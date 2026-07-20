@@ -138,7 +138,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         self._num_worker: int = (
             num_workers
             if num_workers is not None
-            else self.get_param_value("num_workers")
+            else self.get_param_value("num_workers")  # FIXME: Not a configuration param
         )
         self.vocab = None
         self.model = None
@@ -156,7 +156,6 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
 
     def prepare(self, train: DatasetSplit, val: DatasetSplit):
         # Hyperparams from config / defaults
-        max_vocab_size = self.get_param_value("vocab_size")
         max_seq_len = self.get_param_value("max_seq_length")
         embed_dim = self.get_param_value("seq_embed_dim")
         hidden_dim = self.get_param_value("hidden_dim")
@@ -255,17 +254,11 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         weight_decay = self.get_param_value("weight_decay")
 
         scheduler = self.get_param_value("scheduler")
-        scheduler_step_size = self.get_param_value("scheduler_step_size")
-        scheduler_gamma = self.get_param_value("scheduler_gamma")
 
         optimizer_args = {"lr": lr, "weight_decay": weight_decay}
-        scheduler_args = {
-            "step_size": scheduler_step_size,
-            "gamma": scheduler_gamma,
-        }
 
         # remove value which are None
-        scheduler_args = {k: v for k, v in scheduler_args.items() if v is not None}
+        # scheduler_args = {k: v for k, v in scheduler_args.items() if v is not None}
 
         if self.trainer is None:
             trainer = TorchTrainer(
@@ -277,7 +270,6 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
                 optimizer=optimizer_name,
                 optimizer_args=optimizer_args,
                 scheduler=scheduler,
-                scheduler_args=scheduler_args,
                 epochs=epochs,
             )
             self.trainer = trainer
