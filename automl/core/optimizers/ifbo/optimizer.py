@@ -1,7 +1,7 @@
 """
 In-Context Freeze-Thaw Bayesian Optimization (ifBO) optimizer.
 
-- Samples a fixed set of random candidate configurations from ConfigSpace.
+- Dynamically samples candidate configurations from ConfigSpace.
 - Uses the FT-PFN surrogate (ifbo.FTPFN) to schedule which configuration
   to "thaw" next and at which (future) horizon, following MFPI-random.
 - Each step corresponds to one call to `train_single_configuration`.
@@ -36,7 +36,7 @@ class IfboOptimizer(Optimizer):
     """
     In-Context Freeze-Thaw Bayesian Optimization (ifBO) optimizer.
 
-    - Samples a fixed set of random candidate configurations from ConfigSpace.
+    - Dynamically samples candidate configurations from ConfigSpace.
     - Uses the FT-PFN surrogate (ifbo.FTPFN) to schedule which configuration
       to "thaw" next and at which (future) horizon, following MFPI-random.
     - Each step corresponds to one call to `train_single_configuration`.
@@ -69,42 +69,33 @@ class IfboOptimizer(Optimizer):
         # Build encoder for ConfigSpace -> [0,1]^d
         self.hp_space: HyperparameterSpace = self._build_hp_space(self.space)
 
-        # How many random candidates to sample initially
-        self.n_candidates: int = int(runtime_config.get("ifbo_n_candidates", 40))
+        # Probability of exploring by sampling a new candidate.
+        # The actual epsilon decays with the number of completed trials.
+        self.initial_epsilon: float = float(
+            runtime_config.get("ifbo_initial_epsilon", 1.0)
+        )
+        if not 0.0 <= self.initial_epsilon <= 1.0:
+            raise ValueError(
+                "[IfboOptimizer] ifbo_initial_epsilon must be in [0, 1], "
+                f"got {self.initial_epsilon}."
+            )
 
         # Total iFBO "steps" (each is one call to train_single_configuration)
         requested_steps: int = int(runtime_config["n_trials"])
-        max_possible_steps: int = self.n_candidates * self.b_max
-        if requested_steps > max_possible_steps:
-            self.logger.warning(
-                "[IfboOptimizer] Requested n_trials=%d exceeds the maximum number "
-                "of distinct freeze-thaw steps (%d candidates x %d steps=%d). "
-                "Clipping to %d.",
-                requested_steps,
-                self.n_candidates,
-                self.b_max,
-                max_possible_steps,
-                max_possible_steps,
-            )
-            requested_steps = max_possible_steps
         self.total_steps: int = max(1, requested_steps)
 
-        # Sample the fixed set of candidate configurations
+        # Candidate pool starts empty and grows dynamically via epsilon exploration.
         self.candidates: list[_IfBOCandidate] = []
-        for _ in range(self.n_candidates):
-            cfg: Configuration = self.space.sample_configuration()
-            z = self.hp_space.encode(dict(cfg))
-            self.candidates.append(_IfBOCandidate(config=cfg, z=z))
 
         self.logger.info(
-            "[IfboOptimizer] Initialized with %d candidates, budgets in [%d, %d], "
-            "b_max=%d, total_steps=%d, hp_dim=%d",
-            self.n_candidates,
+            "[IfboOptimizer] Initialized with dynamic candidates, budgets in [%d, %d], "
+            "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f",
             self.min_budget,
             self.max_budget,
             self.b_max,
             self.total_steps,
             self.hp_space.dim,
+            self.initial_epsilon,
         )
 
         # Load FT-PFN surrogate model
@@ -180,6 +171,22 @@ class IfboOptimizer(Optimizer):
     def _observed_candidates(self) -> list[_IfBOCandidate]:
         return [c for c in self.candidates if c.steps_done > 0]
 
+    def _sample_new_candidate(self) -> _IfBOCandidate:
+        cfg: Configuration = self.space.sample_configuration()
+        z = self.hp_space.encode(dict(cfg))
+        cand = _IfBOCandidate(config=cfg, z=z)
+        return cand
+
+    def _epsilon(self, completed_trials: int) -> float:
+        """
+        Decaying exploration probability.
+
+        completed_trials is the number of already executed calls to
+        train_single_configuration. With the default initial_epsilon=1.0 this
+        yields 1.0, 0.5, 0.333..., ... for completed_trials 0, 1, 2, ...
+        """
+        return self.initial_epsilon - completed_trials / self.total_steps
+
     def _build_context(self) -> list[Curve]:
         """
         Build the context curves for FT-PFN: one Curve per candidate that has
@@ -213,7 +220,7 @@ class IfboOptimizer(Optimizer):
 
     def _step(self, cand: _IfBOCandidate, step: int = 1) -> None:
         """
-        Thaw `cand` for exactly one more freeze-thaw step:
+        Thaw `cand` for one or more freeze-thaw steps:
         - Increase its step counter
         - Train for the corresponding epoch budget
         - Record normalized time t and performance y (accuracy) for FT-PFN
@@ -249,17 +256,35 @@ class IfboOptimizer(Optimizer):
         return max(ys) if ys else 0.0
 
     def _select_next_candidate(
-        self, context: list[Curve]
+        self, context: list[Curve], completed_trials: int
     ) -> tuple[_IfBOCandidate, int]:
         """
-        MFPI-random acquisition, adapted from ifbo_impl.py:
+        Dynamic epsilon-greedy MFPI-random acquisition:
 
+        - If the candidate list is empty, sample a new candidate
+        - Otherwise sample a new candidate with probability epsilon
+        - With probability 1 - epsilon, sample among pending existing candidates
+          using PI(T_rand) as the sampling weights
         - Sample a random future horizon h_rand in {1, ..., b_max}
         - Sample a random target T_rand above current best accuracy
-        - For each candidate, query FT-PFN at time t' = (steps_done + h_rand)/b_max
-        - Pick the candidate with largest PI(T_rand).
-        - Then actually advance that candidate by *one* step (not h_rand).
+        - For each pending existing candidate, query FT-PFN at time
+          t' = (steps_done + h_rand)/b_max
+        - Then advance the selected candidate by h_rand freeze-thaw steps.
         """
+        if not self.candidates:
+            self.logger.debug("No Candidates, sampling a new one.")
+            candidate = self._sample_new_candidate()
+            self.candidates.append(candidate)
+            return candidate, 1
+
+        epsilon = self._epsilon(completed_trials)
+        self.logger.debug(f"Selected epsilon: {epsilon}")
+        if self._rng.random() < epsilon:
+            self.logger.debug("Exploration: Sampling a new candidate.")
+            candidate = self._sample_new_candidate()
+            self.candidates.append(candidate)
+            return candidate, 1
+
         f_best = self._best_so_far_accuracy()
 
         h_rand = self._rng.randint(1, self.b_max)
@@ -270,12 +295,10 @@ class IfboOptimizer(Optimizer):
             c for c in self.candidates if c.steps_done < self.b_max
         ]
         if not pending:
-            # All candidates fully trained; nothing left to do.
-            # Fallback: return the current best candidate (won't be stepped further).
-            self.logger.warning(
-                "[IfboOptimizer] No pending candidates (all reached max steps)."
-            )
-            return self._select_incumbent_candidate(), 1
+            self.logger.debug("No pending candidates, sampling a new one.")
+            candidate = self._sample_new_candidate()
+            self.candidates.append(candidate)
+            return candidate, 1
 
         query: list[Curve] = []
         for c in pending:
@@ -291,10 +314,15 @@ class IfboOptimizer(Optimizer):
         # Each PredictionResult has .pi(threshold) -> probability of improvement
         T_tensor = torch.tensor(T_rand, dtype=torch.float32)
         pi_scores = torch.stack([pred.pi(T_tensor).squeeze() for pred in predictions])
+        pi_scores = torch.nan_to_num(pi_scores.float(), nan=0.0, posinf=0.0, neginf=0.0)
+        pi_scores = torch.clamp(pi_scores, min=0.0)
 
-        # TODO: We can sample here instead of doing it greedily
-        best_idx = int(torch.argmax(pi_scores))
-        return pending[best_idx], h_rand
+        weights = pi_scores.tolist()
+        if sum(weights) <= 0.0:
+            selected = self._rng.choice(pending)
+        else:
+            selected = self._rng.choices(pending, weights=weights, k=1)[0]
+        return selected, h_rand
 
     def _select_incumbent_candidate(self) -> _IfBOCandidate:
         """
@@ -327,16 +355,11 @@ class IfboOptimizer(Optimizer):
             self.total_steps,
         )
 
-        # Initial random sample: pick one candidate, evaluate for one step.
-        first = self._rng.choice(self.candidates)
-        self._step(first)
-        used_steps = 1
+        used_steps = 0
 
         while used_steps < self.total_steps:
             context = self._build_context()
-            next_cand, h_rand = self._select_next_candidate(context)
-            # If all have reached max steps, _select_next_candidate returns
-            # the current best; don't advance further.
+            next_cand, h_rand = self._select_next_candidate(context, used_steps + 1)
             if next_cand.steps_done >= self.b_max:
                 self.logger.info(
                     "[IfboOptimizer] All candidates reached max steps. "

@@ -73,7 +73,7 @@ def build_config_space(
         default="steplr",
     )
     weight_decay = Float("weight_decay", (1e-6, 1e-2), default=1e-5, log=True)
-    batch_size = Categorical("batch_size", [32, 64, 128, 256], default=64)
+    batch_size = Integer("batch_size", (32, 256), default=64, log=True)
 
     # --- linear-only hyperparameters ---
     alpha = Float("alpha", (1e-6, 1e-1), default=1e-4, log=True)
@@ -104,24 +104,21 @@ def build_config_space(
     warmup_ratio = Float("warmup_ratio", (0.0, 0.2), default=0.1)
 
     # --- sequence-dl (LSTM/GRU/CNN) hyperparameters ---
-    seq_arch = Categorical("seq_arch", ["bilstm", "cnn"], default="bilstm")
+    # seq_arch = Categorical("seq_arch", ["bilstm", "cnn"], default="bilstm")
     seq_embed_dim = Integer("seq_embed_dim", (32, 512), default=128, log=True)
     seq_num_layers = Integer("seq_num_layers", (1, 3), default=1)
 
     # CNN-specific
-    seq_num_filters = Integer("seq_num_filters", (50, 300), default=100, log=True)
-    kernel_possibilities = ["3", "4", "5"]
-    combinations = [
-        ",".join(combo)
-        for i in range(1, len(kernel_possibilities) + 1)
-        for combo in itertools.combinations(kernel_possibilities, i)
-    ]
-    seq_kernel_pattern = Categorical(
-        "seq_kernel_pattern", combinations, default=",".join(kernel_possibilities)
-    )
-
-    # --- cross-cutting ---
-    class_balance = Categorical("class_balance", [True, False], default=False)
+    # seq_num_filters = Integer("seq_num_filters", (50, 300), default=100, log=True)
+    # kernel_possibilities = ["3", "4", "5"]
+    # combinations = [
+    #     ",".join(combo)
+    #     for i in range(1, len(kernel_possibilities) + 1)
+    #     for combo in itertools.combinations(kernel_possibilities, i)
+    # ]
+    # seq_kernel_pattern = Categorical(
+    #     "seq_kernel_pattern", combinations, default=",".join(kernel_possibilities)
+    # )
 
     # --- BPE-RNN (byte-level BPE + RNN) hyperparameters ---
     bpe_vocab_size = Integer(
@@ -163,7 +160,6 @@ def build_config_space(
             max_seq_length,  # sequence-dl and transformer only
             weight_decay,  # sequence-dl and transformer only
             batch_size,
-            class_balance,
         ]
     )
 
@@ -222,9 +218,9 @@ def build_config_space(
             [
                 seq_embed_dim,
                 seq_num_layers,
-                seq_arch,
-                seq_num_filters,
-                seq_kernel_pattern,
+                # seq_arch,
+                # seq_num_filters,
+                # seq_kernel_pattern,
             ]
         )
 
@@ -287,10 +283,10 @@ def build_config_space(
             [
                 EqualsCondition(seq_embed_dim, model_type, "sequence-dl"),
                 EqualsCondition(seq_num_layers, model_type, "sequence-dl"),
-                EqualsCondition(seq_arch, model_type, "sequence-dl"),
-                EqualsCondition(seq_arch, model_type, "sequence-dl"),
-                EqualsCondition(seq_num_filters, seq_arch, "cnn"),
-                EqualsCondition(seq_kernel_pattern, seq_arch, "cnn"),
+                # EqualsCondition(seq_arch, model_type, "sequence-dl"),
+                # EqualsCondition(seq_arch, model_type, "sequence-dl"),
+                # EqualsCondition(seq_num_filters, seq_arch, "cnn"),
+                # EqualsCondition(seq_kernel_pattern, seq_arch, "cnn"),
             ]
         )
 

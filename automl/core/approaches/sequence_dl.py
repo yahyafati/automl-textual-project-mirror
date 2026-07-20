@@ -54,42 +54,6 @@ class BiLSTMClassifier(nn.Module):
         return logits
 
 
-class TextCNN(nn.Module):
-    def __init__(
-        self,
-        vocab_size: int,
-        embed_dim: int,
-        num_classes: int,
-        num_filters: int = 100,
-        kernel_sizes: tuple[int, ...] = (3, 4, 5),
-        dropout: float = 0.5,
-    ):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
-        self.convs = nn.ModuleList(
-            [
-                nn.Conv1d(
-                    in_channels=embed_dim,
-                    out_channels=num_filters,
-                    kernel_size=k,
-                )
-                for k in kernel_sizes
-            ]
-        )
-        self.dropout = nn.Dropout(dropout)
-        self.fc = nn.Linear(num_filters * len(kernel_sizes), num_classes)
-
-    def forward(self, input_ids):
-        emb = self.embedding(input_ids)  # (B, L, E)
-        x = emb.transpose(1, 2)  # (B, E, L)
-        conv_outs = [torch.relu(conv(x)) for conv in self.convs]  # [(B, F, L-k+1), ...]
-        pooled = [torch.max(co, dim=2)[0] for co in conv_outs]  # [(B, F), ...]
-        cat = torch.cat(pooled, dim=1)  # (B, F * len(kernels))
-        cat = self.dropout(cat)
-        logits = self.fc(cat)
-        return logits
-
-
 class TextSequenceDataset(torch.utils.data.Dataset):
     def __init__(
         self,
@@ -203,31 +167,15 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
 
         # Build model
         vocab_size = self.tokenizer.vocab_size
-        if arch == "bilstm":
-            self.model = BiLSTMClassifier(
-                vocab_size=vocab_size,
-                embed_dim=embed_dim,
-                hidden_dim=hidden_dim,
-                num_classes=self._num_classes,
-                num_layers=num_layers,
-                dropout=dropout,
-                bidirectional=True,
-            )
-        elif arch == "cnn":
-            num_filters = self.get_param_value("seq_num_filters")
-            pattern: str = self.get_param_value("seq_kernel_pattern")
-            kernel_sizes = [int(k.strip()) for k in pattern.split(",")]
-
-            self.model = TextCNN(
-                vocab_size=vocab_size,
-                embed_dim=embed_dim,
-                num_classes=self._num_classes,
-                num_filters=num_filters,
-                kernel_sizes=tuple(kernel_sizes),
-                dropout=dropout,
-            )
-        else:
-            raise ValueError(f"Unknown arch: {arch}")
+        self.model = BiLSTMClassifier(
+            vocab_size=vocab_size,
+            embed_dim=embed_dim,
+            hidden_dim=hidden_dim,
+            num_classes=self._num_classes,
+            num_layers=num_layers,
+            dropout=dropout,
+            bidirectional=True,
+        )
         assert self.model is not None
         self.model.to(self._device)
 

@@ -28,7 +28,7 @@ class Checkpoint(TypedDict):
 
 class TorchTrainer(Trainer):
 
-    OPTIMIZER_MAPPING: dict[str, type[torch.optim.Optimizer]] = {
+    OPTIMIZER_MAPPING = {
         "adam": torch.optim.Adam,
         "adamw": torch.optim.AdamW,
         "sgd": torch.optim.SGD,
@@ -74,7 +74,7 @@ class TorchTrainer(Trainer):
         self._current_epoch = 0
 
         logger.debug(
-            f"Initialized TorchTrainer for '{self.approach_name}' on device: {self.device}. "
+            f"Initialized TorchTrainer for '{self.approach_name}' on device: {self.device.type}. "
             f"Total epochs planned: {self.epochs}"
         )
 
@@ -89,7 +89,9 @@ class TorchTrainer(Trainer):
             if opt_class is None:
                 raise ValueError(f"Unsupported optimizer: {optimizer}")
             optimizer_args = optimizer_args or {}
-            return opt_class(model.parameters(), **optimizer_args)
+            lr = optimizer_args.get("lr", 1e-3)
+            weight_decay = optimizer_args.get("weight_decay", 1e-4)
+            return opt_class(model.parameters(), lr=lr, weight_decay=weight_decay)
 
         return optimizer
 
