@@ -27,7 +27,7 @@ from ifbo import Curve
 from ifbo.surrogate import FTPFN
 
 from automl.core.optimizers.base_optimizer import Optimizer
-from automl.cli import RuntimeConfigDict
+from automl.cli import RuntimeConfig
 from .candidate import IfBOCandidate as _IfBOCandidate
 from .hp_space import Categorical, Float, HPSpec, HyperparameterSpace, Integer
 
@@ -44,7 +44,7 @@ class IfboOptimizer(Optimizer):
       type-aware scheme (float/int/log/categorical), similar to ifbo_impl.py.
     """
 
-    def __init__(self, runtime_config: RuntimeConfigDict):
+    def __init__(self, runtime_config: RuntimeConfig):
         super().__init__(runtime_config)
 
         # Optional: load base data once, if supported by the dataset

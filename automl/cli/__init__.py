@@ -1,5 +1,5 @@
 from .argparser import *
-from .types import RuntimeConfigDict
+from .types import RuntimeConfig
 
 __all__ = [
     "create_parser",
@@ -7,5 +7,5 @@ __all__ = [
     "merge_config",
     "load_runtime_config",
     "DEFAULT_CONFIG",
-    "RuntimeConfigDict",
+    "RuntimeConfig",
 ]

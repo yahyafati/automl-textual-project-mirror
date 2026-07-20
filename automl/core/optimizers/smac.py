@@ -6,13 +6,13 @@ from typing import Optional
 from ConfigSpace import Configuration
 
 from automl.core.optimizers.base_optimizer import Optimizer
-from automl.cli import RuntimeConfigDict
+from automl.cli import RuntimeConfig
 
 
 class SmacOptimizer(Optimizer):
     """Encapsulates SMAC-based HPO and evaluation logic."""
 
-    def __init__(self, runtime_config: RuntimeConfigDict):
+    def __init__(self, runtime_config: RuntimeConfig):
         super().__init__(runtime_config)
 
         # Optional: load base data once, if supported by the dataset

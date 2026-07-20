@@ -6,35 +6,26 @@ from typing import Optional, Any
 
 import yaml
 
-from automl.cli.types import RuntimeConfigDict
+from automl.cli.types import RuntimeConfig
 
-DEFAULT_CONFIG: RuntimeConfigDict = {
-    "runtime_id": "",  # TODO: Not best
-    "dataset": "amazon",
-    "output_path": Path("results"),
-    "load_path": None,
-    "data_path": Path("data"),
-    "seed": int(datetime.datetime.now().timestamp() % 1e6),
-    "approach": "tfidf-ffnn",
-    "vocab_size": 1000,
-    "token_length": 128,
-    "evaluation_budget": 5,
-    "max_budget": 40,
-    "min_budget": 5,
-    "n_trials": 10,
-    "batch_size": 32,
-    "lr": 0.01,
-    "weight_decay": 0.01,
-    "lstm_emb_dim": 64,
-    "lstm_hidden_dim": 64,
-    "ffnn_hidden_layer_dim": 64,
-    "data_fraction": 1.0,
-    "enable_jsonl_history": True,
-    "num_workers": 0,
-    "max_num_rows": 40000,
-    "optimizer": "smac",
-    "max_trainers_in_memory": 10,
-}
+DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
+    runtime_id="",
+    dataset="amazon",
+    output_path=Path("results"),
+    load_path=None,
+    data_path=Path("data"),
+    seed=int(datetime.datetime.now().timestamp() % 1e6),
+    approach="tfidf-ffnn",
+    evaluation_budget=5,
+    max_budget=40,
+    min_budget=5,
+    n_trials=10,
+    enable_jsonl_history=True,
+    max_num_rows=40_000,
+    optimizer="smac",
+    max_trainers_in_memory=10,
+    num_workers=2,
+)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -42,6 +33,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--config", type=Path, default="runconfig.yml")
 
+    parser.add_argument("--runtime-id", type=str)
     parser.add_argument(
         "--dataset",
         type=str,
@@ -111,8 +103,8 @@ def load_yaml(path: Path | str) -> dict[str, Any]:
 def merge_config(
     yaml_cfg: Optional[dict[str, Any]] = None,
     cli_args: Optional[argparse.Namespace] = None,
-    defaults: Optional[RuntimeConfigDict] = None,
-) -> RuntimeConfigDict:
+    defaults: Optional[RuntimeConfig] = None,
+) -> RuntimeConfig:
     if defaults is None:
         defaults = DEFAULT_CONFIG
     cfg = defaults.copy()
@@ -143,7 +135,7 @@ def merge_config(
             cfg_key = key_map.get(k, k)
             cfg[cfg_key] = v
 
-    return RuntimeConfigDict(**cfg)
+    return RuntimeConfig(**cfg)
 
 
 def load_runtime_config(config_path: Optional[Path | str] = None):

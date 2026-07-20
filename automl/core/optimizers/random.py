@@ -5,7 +5,7 @@ from ConfigSpace import (
 )
 
 from automl.core.optimizers.base_optimizer import Optimizer
-from automl.cli import RuntimeConfigDict
+from automl.cli import RuntimeConfig
 
 
 class RandomSearch(Optimizer):
@@ -16,7 +16,7 @@ class RandomSearch(Optimizer):
       * keeps track of the best (incumbent) and evaluates it at the end
     """
 
-    def __init__(self, runtime_config: RuntimeConfigDict):
+    def __init__(self, runtime_config: RuntimeConfig):
         super().__init__(runtime_config)
 
         if hasattr(self.dataset, "load_base_data"):

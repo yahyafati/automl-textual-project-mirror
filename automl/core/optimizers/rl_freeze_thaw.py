@@ -17,7 +17,7 @@ import numpy as np
 from ConfigSpace import Configuration, ConfigurationSpace
 
 from automl.core.optimizers.base_optimizer import Optimizer
-from automl.cli import RuntimeConfigDict
+from automl.cli import RuntimeConfig
 from automl.logger import get_logger
 
 logger = get_logger()
@@ -337,7 +337,7 @@ class RLFreezeThawOptimizer(Optimizer):
     ``rl_surrogate_probability``.
     """
 
-    def __init__(self, runtime_config: RuntimeConfigDict):
+    def __init__(self, runtime_config: RuntimeConfig):
         super().__init__(runtime_config)
         if hasattr(self.dataset, "load_base_data"):
             self.dataset.load_base_data()

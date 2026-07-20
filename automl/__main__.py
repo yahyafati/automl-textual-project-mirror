@@ -13,13 +13,13 @@ from automl.core.registry import register_all_approaches
 from .core import optimizers
 from .core.utils import timer
 from .core.utils.misc import set_seed
-from .cli import load_runtime_config, RuntimeConfigDict
+from .cli import load_runtime_config, RuntimeConfig
 from .environment.device_info import get_device_info, save_device_info
 from .environment.save_requirements import save_requirements
 from .logger import get_logger
 
 
-def main(config: RuntimeConfigDict):
+def main(config: RuntimeConfig):
     register_all_approaches()
     device_info = get_device_info()
     save_device_info(device_info, config["output_path"] / "device_info.json")

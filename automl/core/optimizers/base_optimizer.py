@@ -25,13 +25,13 @@ from automl.core.utils.misc import (
     set_seed,
     save_incumbent,
 )
-from automl.cli import RuntimeConfigDict
+from automl.cli import RuntimeConfig
 from automl.logger import get_logger
 
 
 class Optimizer(ABC):
 
-    def __init__(self, runtime_config: RuntimeConfigDict):
+    def __init__(self, runtime_config: RuntimeConfig):
         self.runtime_config = runtime_config
         self.output_path = runtime_config["output_path"]
         self.logger = get_logger()

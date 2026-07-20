@@ -1,10 +1,11 @@
+import dataclasses
 from pathlib import Path
 from typing import TypedDict, Optional
 
 from automl.core.types import ApproachName
 
 
-class RuntimeConfigDict(TypedDict):
+class RuntimeConfig(TypedDict):
     """Custom TypedDict mapping to configuration parameters."""
 
     runtime_id: str
@@ -14,8 +15,6 @@ class RuntimeConfigDict(TypedDict):
     data_path: Path
     seed: int
     approach: ApproachName
-    vocab_size: int
-    token_length: int
 
     evaluation_budget: int
     max_budget: int
@@ -23,14 +22,6 @@ class RuntimeConfigDict(TypedDict):
     n_trials: int
 
     max_num_rows: int
-
-    batch_size: int
-    lr: float
-    weight_decay: float
-    lstm_emb_dim: int
-    lstm_hidden_dim: int
-    ffnn_hidden_layer_dim: int
-    data_fraction: float
 
     enable_jsonl_history: bool
     num_workers: int
