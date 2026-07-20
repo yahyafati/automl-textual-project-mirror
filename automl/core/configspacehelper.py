@@ -116,7 +116,6 @@ def build_config_space(
         for i in range(1, len(kernel_possibilities) + 1)
         for combo in itertools.combinations(kernel_possibilities, i)
     ]
-    print(combinations)
     seq_kernel_pattern = Categorical(
         "seq_kernel_pattern", combinations, default=",".join(kernel_possibilities)
     )
