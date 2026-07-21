@@ -307,8 +307,9 @@ class IfboOptimizer(Optimizer):
             candidate = self._rng.choice(pending)
             return candidate, 1
 
+        MAX_LOOKAHEAD = 5
         f_best = self._best_so_far_accuracy()
-        h_rand = self._rng.randint(1, self.b_max)
+        h_rand = min(self._rng.randint(1, self.b_max), MAX_LOOKAHEAD)
         tau_rand = 10 ** self._rng.uniform(-4, -1)  # same scale as in ifbo_impl
         T_rand = f_best + tau_rand * (1.0 - f_best)
 
@@ -371,7 +372,7 @@ class IfboOptimizer(Optimizer):
 
         while used_steps < self.total_steps:
             context = self._build_context()
-            next_cand, h_rand = self._select_next_candidate(context, used_steps + 1)
+            next_cand, steps = self._select_next_candidate(context, used_steps + 1)
             if next_cand.steps_done >= self.b_max:
                 self.logger.info(
                     "[IfboOptimizer] All candidates reached max steps. "
@@ -379,8 +380,12 @@ class IfboOptimizer(Optimizer):
                     used_steps,
                 )
                 break
-
-            self._step(next_cand, h_rand)
+            self.logger.debug(
+                "[IfboOptimizer] Selected candidate: %s for steps: %d",
+                next_cand.config,
+                steps,
+            )
+            self._step(next_cand, steps)
             used_steps += 1
 
             if used_steps % 25 == 0 or used_steps == self.total_steps:
