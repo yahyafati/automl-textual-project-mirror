@@ -359,11 +359,8 @@ class IfboOptimizer(Optimizer):
             idx = torch.argmax(pi_scores)
             selected = pending[idx]
         else:
-            weights = pi_scores.tolist()
-            if sum(weights) <= 0.0:
-                selected = self._rng.choice(pending)
-            else:
-                selected = self._rng.choices(pending, weights=weights, k=1)[0]
+            weights = torch.softmax(pi_scores, dim=0).tolist()
+            selected = self._rng.choices(pending, weights=weights, k=1)[0]
         return selected, h_rand
 
     @staticmethod

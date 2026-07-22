@@ -9,6 +9,7 @@ train/eval function.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from automl.core.registry import register_all_approaches
@@ -26,6 +27,8 @@ def main(config: RuntimeConfig):
     device_info = get_device_info()
     save_device_info(device_info, config["output_path"] / "device_info.json")
     save_requirements(config["output_path"] / "requirements.txt")
+    with open(config["output_path"] / "runtime_config.json", "w") as f:
+        json.dump(config, f, indent=2, default=str)
 
     set_seed(config["seed"])
     optimizer_classes = {
