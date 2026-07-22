@@ -311,7 +311,7 @@ class IfboOptimizer(Optimizer):
 
         MAX_LOOKAHEAD = 3  # To prevent it from running to max budget
         f_best = self._best_so_far_accuracy()
-        h_rand = min(self._rng.randint(1, self.b_max), MAX_LOOKAHEAD)
+        h_rand = self._rng.randint(1, MAX_LOOKAHEAD)
         tau_rand = 10 ** self._rng.uniform(-4, -1)
         T_rand = f_best + tau_rand * (1.0 - f_best)
 
