@@ -1,24 +1,20 @@
-import json
 import hashlib
+import json
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Union, Optional
 
+import numpy as np
 from ConfigSpace import Configuration, ConfigurationSpace
 from filelock import FileLock
 
-from automl.core.trainers.base_trainer import Trainer
+from automl.cli import RuntimeConfig
 from automl.core import configspacehelper
 from automl.core.approaches.base_approach import Approach
 from automl.core.datasets import get_dataset_class
-from automl.core.plot_history import (
-    plot_learning_curves,
-    plot_optimization_history,
-    plot_budget_vs_performance,
-    plot_epoch_heatmap,
-)
 from automl.core.registry import get_approach, register_all_approaches
+from automl.core.trainers.base_trainer import Trainer
 from automl.core.types import DatasetSplit, TrialResult, ApproachName
 from automl.core.utils.misc import SavedIncumbent
 from automl.core.utils.misc import (
@@ -27,7 +23,6 @@ from automl.core.utils.misc import (
     set_seed,
     save_incumbent,
 )
-from automl.cli import RuntimeConfig
 from automl.logger import get_logger
 from automl.trial_plots import save_all_plots
 
@@ -120,8 +115,17 @@ class Optimizer(ABC):
                 )
             elif isinstance(incumbent, list):
                 saved_incumbents: list[SavedIncumbent] = []
-                for incumbent_ in incumbent:
-                    result = self.evaluate_incumbent(incumbent_)
+                has_multiple_incumbents = len(incumbent) > 1
+                for incumbent_idx, incumbent_ in enumerate(incumbent):
+                    predictions_filename = (
+                        f"predictions_incumbent_{incumbent_idx}.npy"
+                        if has_multiple_incumbents
+                        else "predictions.npy"
+                    )
+                    result = self.evaluate_incumbent(
+                        incumbent_,
+                        predictions_filename=predictions_filename,
+                    )
                     saved_incumbents.append(
                         {
                             "incumbent": incumbent_,
@@ -149,6 +153,20 @@ class Optimizer(ABC):
         save_all_plots(self.history, outdir=self.output_path)
 
         self.logger.info("Plot images saved.")
+
+    def _save_test_predictions(
+        self,
+        predictions: np.ndarray,
+        filename: str = "predictions.npy",
+    ) -> Path:
+        """Persist final test predictions in the expected NumPy format."""
+        predictions_path = self.output_path / filename
+        self.output_path.mkdir(parents=True, exist_ok=True)
+        np.save(predictions_path, predictions)
+        self.logger.info(
+            f"[{self.__class__.__name__}] Saved test predictions to {predictions_path}"
+        )
+        return predictions_path
 
     @staticmethod
     def _config_to_hash_id(config: Configuration) -> str:
@@ -325,7 +343,11 @@ class Optimizer(ABC):
 
         return val_error
 
-    def evaluate_incumbent(self, incumbent: Configuration):
+    def evaluate_incumbent(
+        self,
+        incumbent: Configuration,
+        predictions_filename: str = "predictions.npy",
+    ):
         """Same evaluation protocol as SmacOptimizer."""
         epochs = self.runtime_config["evaluation_budget"]
 
@@ -364,10 +386,15 @@ class Optimizer(ABC):
         with approach.with_mode("eval") as _approach:
             prepared = _approach.prepare(train_split, test_split)
             train_result = _approach.train(prepared, epochs=epochs)
+            prediction_result = _approach.predict(test_df)
 
         self.logger.info(
             f"[{self.__class__.__name__}] Final Held-Out Test Accuracy: "
             f"{train_result['val_accuracy']:.4f}"
+        )
+        self._save_test_predictions(
+            prediction_result["y_pred"],
+            filename=predictions_filename,
         )
 
         return train_result
