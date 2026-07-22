@@ -26,6 +26,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     num_workers=2,
     log_level="INFO",
     use_random_selection=False,
+    ifbo_greedy_candidate_selection=False,
 )
 
 

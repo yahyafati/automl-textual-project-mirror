@@ -30,3 +30,4 @@ class RuntimeConfig(TypedDict):
     log_level: str
 
     use_random_selection: bool
+    ifbo_greedy_candidate_selection: bool

@@ -81,6 +81,7 @@ class IfboOptimizer(Optimizer):
             )
 
         self.use_random_selection = runtime_config.get("use_random_selection")
+        self.greedy_selection = runtime_config.get("ifbo_greedy_candidate_selection")
         # Total iFBO "steps" (each is one call to train_single_configuration)
         requested_steps: int = int(runtime_config["n_trials"])
         self.total_steps: int = max(1, requested_steps)
@@ -90,7 +91,7 @@ class IfboOptimizer(Optimizer):
 
         self.logger.info(
             "[IfboOptimizer] Initialized with dynamic candidates, budgets in [%d, %d], "
-            "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f, use_random_selection=%s",
+            "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f, use_random_selection=%s, greedy_selection=%s",
             self.min_budget,
             self.max_budget,
             self.b_max,
@@ -98,6 +99,7 @@ class IfboOptimizer(Optimizer):
             self.hp_space.dim,
             self.initial_epsilon,
             self.use_random_selection,
+            self.greedy_selection,
         )
 
         # Load FT-PFN surrogate model
@@ -190,7 +192,7 @@ class IfboOptimizer(Optimizer):
         Polynomial Decay:
         e_t = e_min + (e_0 - e_min) * (1 - t/T)^p
         """
-        eps_min = 0.05
+        eps_min = 0.1
         p = 2.0
         frac = completed_trials / self.total_steps
         return eps_min + (self.initial_epsilon - eps_min) * (1 - frac) ** p
@@ -307,10 +309,10 @@ class IfboOptimizer(Optimizer):
             candidate = self._rng.choice(pending)
             return candidate, 1
 
-        MAX_LOOKAHEAD = 5
+        MAX_LOOKAHEAD = 3  # To prevent it from running to max budget
         f_best = self._best_so_far_accuracy()
         h_rand = min(self._rng.randint(1, self.b_max), MAX_LOOKAHEAD)
-        tau_rand = 10 ** self._rng.uniform(-4, -1)  # same scale as in ifbo_impl
+        tau_rand = 10 ** self._rng.uniform(-4, -1)
         T_rand = f_best + tau_rand * (1.0 - f_best)
 
         query: list[Curve] = []
@@ -330,11 +332,15 @@ class IfboOptimizer(Optimizer):
         pi_scores = torch.nan_to_num(pi_scores.float(), nan=0.0, posinf=0.0, neginf=0.0)
         pi_scores = torch.clamp(pi_scores, min=0.0)
 
-        weights = pi_scores.tolist()
-        if sum(weights) <= 0.0:
-            selected = self._rng.choice(pending)
+        if self.greedy_selection:
+            idx = torch.argmax(pi_scores)
+            selected = pending[idx]
         else:
-            selected = self._rng.choices(pending, weights=weights, k=1)[0]
+            weights = pi_scores.tolist()
+            if sum(weights) <= 0.0:
+                selected = self._rng.choice(pending)
+            else:
+                selected = self._rng.choices(pending, weights=weights, k=1)[0]
         return selected, h_rand
 
     def _select_incumbent_candidate(self) -> _IfBOCandidate:
