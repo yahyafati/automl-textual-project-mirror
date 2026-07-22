@@ -84,6 +84,7 @@ def save_incumbent(
     incumbent: SavedIncumbent | list[SavedIncumbent],
     output_path: Union[str, Path],
     filename: str = "incumbent.json",
+    ensemble_evaluation_result: TrainResult | None = None,
 ) -> Path:
     """
     Saves an SMAC incumbent (single config or list of configs) to disk.
@@ -96,13 +97,20 @@ def save_incumbent(
     # Normalize to list
     data: dict[str, Any] | list[dict[str, Any]]
     if isinstance(incumbent, (list, tuple)):
-        data = [
+        incumbent_data = [
             {
                 "incumbent": _serialize_config(config["incumbent"]),
                 "evaluation_result": config["evaluation_result"],
             }
             for config in incumbent
         ]
+        if ensemble_evaluation_result is None:
+            data = incumbent_data
+        else:
+            data = {
+                "incumbents": incumbent_data,
+                "ensemble_evaluation_result": ensemble_evaluation_result,
+            }
     else:
         data = {
             "incumbent": _serialize_config(incumbent["incumbent"]),

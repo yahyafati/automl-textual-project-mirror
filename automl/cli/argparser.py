@@ -27,6 +27,8 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     log_level="INFO",
     use_random_selection=False,
     ifbo_greedy_candidate_selection=False,
+    ifbo_incumbent_ensemble_top_k=5,
+    ifbo_incumbent_ensemble_accuracy_threshold=0.05,
 )
 
 
@@ -93,6 +95,19 @@ def create_parser() -> argparse.ArgumentParser:
         "--optimizer", choices=["smac", "random", "ifbo", "rl_freeze_thaw"]
     )
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument(
+        "--ifbo-incumbent-ensemble-top-k",
+        type=int,
+        help="Maximum number of near-best ifBO incumbents to ensemble.",
+    )
+    parser.add_argument(
+        "--ifbo-incumbent-ensemble-accuracy-threshold",
+        type=float,
+        help=(
+            "Absolute validation-accuracy tolerance for including an ifBO "
+            "incumbent in the final ensemble."
+        ),
+    )
 
     return parser
 

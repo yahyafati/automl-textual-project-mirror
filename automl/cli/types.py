@@ -31,3 +31,5 @@ class RuntimeConfig(TypedDict):
 
     use_random_selection: bool
     ifbo_greedy_candidate_selection: bool
+    ifbo_incumbent_ensemble_top_k: int
+    ifbo_incumbent_ensemble_accuracy_threshold: float

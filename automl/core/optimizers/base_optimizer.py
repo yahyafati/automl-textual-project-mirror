@@ -15,7 +15,7 @@ from automl.core.approaches.base_approach import Approach
 from automl.core.datasets import get_dataset_class
 from automl.core.registry import get_approach, register_all_approaches
 from automl.core.trainers.base_trainer import Trainer
-from automl.core.types import DatasetSplit, TrialResult, ApproachName
+from automl.core.types import DatasetSplit, TrialResult, ApproachName, TrainResult
 from automl.core.utils.misc import SavedIncumbent
 from automl.core.utils.misc import (
     get_device,
@@ -116,25 +116,54 @@ class Optimizer(ABC):
             elif isinstance(incumbent, list):
                 saved_incumbents: list[SavedIncumbent] = []
                 has_multiple_incumbents = len(incumbent) > 1
+                incumbent_predictions: list[np.ndarray] = []
+                heldout_labels: np.ndarray | None = None
+                ensemble_evaluation_result: TrainResult | None = None
                 for incumbent_idx, incumbent_ in enumerate(incumbent):
                     predictions_filename = (
                         f"predictions_incumbent_{incumbent_idx}.npy"
                         if has_multiple_incumbents
                         else "predictions.npy"
                     )
-                    result = self.evaluate_incumbent(
-                        incumbent_,
-                        predictions_filename=predictions_filename,
-                    )
+                    if has_multiple_incumbents:
+                        result, prediction_result = self.evaluate_incumbent(
+                            incumbent_,
+                            predictions_filename=predictions_filename,
+                            return_predictions=True,
+                        )
+                        incumbent_predictions.append(prediction_result["y_pred"])
+                        incumbent_labels = prediction_result["y_true"]
+                        if heldout_labels is None:
+                            heldout_labels = incumbent_labels
+                        elif not np.array_equal(heldout_labels, incumbent_labels):
+                            raise ValueError(
+                                "Cannot compute ensemble accuracy because incumbent "
+                                "evaluations used different held-out labels."
+                            )
+                    else:
+                        result = self.evaluate_incumbent(
+                            incumbent_,
+                            predictions_filename=predictions_filename,
+                        )
                     saved_incumbents.append(
                         {
                             "incumbent": incumbent_,
                             "evaluation_result": result,
                         }
                     )
+                if has_multiple_incumbents:
+                    if heldout_labels is None:
+                        raise ValueError(
+                            "Cannot compute ensemble accuracy without held-out labels."
+                        )
+                    ensemble_evaluation_result = self._save_ensemble_predictions(
+                        incumbent_predictions,
+                        heldout_labels,
+                    )
                 save_incumbent(
                     incumbent=saved_incumbents,
                     output_path=self.output_path,
+                    ensemble_evaluation_result=ensemble_evaluation_result,
                 )
             else:
                 raise ValueError(f"Unknown data type for incumbent ({type(incumbent)})")
@@ -167,6 +196,57 @@ class Optimizer(ABC):
             f"[{self.__class__.__name__}] Saved test predictions to {predictions_path}"
         )
         return predictions_path
+
+    @staticmethod
+    def _majority_vote(labels: np.ndarray):
+        classes, counts = np.unique(labels, return_counts=True)
+        return classes[int(np.argmax(counts))]
+
+    def _save_ensemble_predictions(
+        self,
+        incumbent_predictions: list[np.ndarray],
+        heldout_labels: np.ndarray,
+        filename: str = "predictions.npy",
+    ) -> TrainResult:
+        """
+        Persist a deterministic majority-vote ensemble and compute held-out accuracy.
+
+        Ties are broken by the natural sort order of class labels via np.unique.
+        """
+        if not incumbent_predictions:
+            raise ValueError("Cannot ensemble an empty prediction list.")
+
+        prediction_shapes = {pred.shape for pred in incumbent_predictions}
+        if len(prediction_shapes) != 1:
+            raise ValueError(
+                "Cannot ensemble incumbent predictions with different shapes: "
+                f"{sorted(prediction_shapes)}"
+            )
+
+        stacked_predictions = np.stack(incumbent_predictions, axis=0)
+        ensemble_predictions = np.apply_along_axis(
+            self._majority_vote,
+            axis=0,
+            arr=stacked_predictions,
+        )
+        self._save_test_predictions(
+            ensemble_predictions,
+            filename=filename,
+        )
+        if ensemble_predictions.shape != heldout_labels.shape:
+            raise ValueError(
+                "Cannot compute ensemble accuracy because predictions and labels "
+                f"have different shapes: {ensemble_predictions.shape} vs "
+                f"{heldout_labels.shape}."
+            )
+        ensemble_accuracy = float(np.mean(ensemble_predictions == heldout_labels))
+        ensemble_result = TrainResult(val_accuracy=ensemble_accuracy, history=[])
+        self.logger.info(
+            f"[{self.__class__.__name__}] Saved majority-vote ensemble from "
+            f"{len(incumbent_predictions)} incumbents with held-out accuracy "
+            f"{ensemble_accuracy:.4f}."
+        )
+        return ensemble_result
 
     @staticmethod
     def _config_to_hash_id(config: Configuration) -> str:
@@ -347,6 +427,7 @@ class Optimizer(ABC):
         self,
         incumbent: Configuration,
         predictions_filename: str = "predictions.npy",
+        return_predictions: bool = False,
     ):
         """Same evaluation protocol as SmacOptimizer."""
         epochs = self.runtime_config["evaluation_budget"]
@@ -397,4 +478,6 @@ class Optimizer(ABC):
             filename=predictions_filename,
         )
 
+        if return_predictions:
+            return train_result, prediction_result
         return train_result

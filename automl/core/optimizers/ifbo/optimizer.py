@@ -82,6 +82,25 @@ class IfboOptimizer(Optimizer):
 
         self.use_random_selection = runtime_config.get("use_random_selection")
         self.greedy_selection = runtime_config.get("ifbo_greedy_candidate_selection")
+        self.incumbent_ensemble_top_k: int = runtime_config.get(
+            "ifbo_incumbent_ensemble_top_k"
+        )
+
+        if self.incumbent_ensemble_top_k < 1:
+            raise ValueError(
+                "[IfboOptimizer] ifbo_incumbent_ensemble_top_k must be >= 1, "
+                f"got {self.incumbent_ensemble_top_k}."
+            )
+
+        self.incumbent_ensemble_accuracy_threshold: float = float(
+            runtime_config.get("ifbo_incumbent_ensemble_accuracy_threshold", 0.01)
+        )
+        if not 0.0 <= self.incumbent_ensemble_accuracy_threshold <= 1.0:
+            raise ValueError(
+                "[IfboOptimizer] ifbo_incumbent_ensemble_accuracy_threshold must be "
+                f"in [0, 1], got {self.incumbent_ensemble_accuracy_threshold}."
+            )
+
         # Total iFBO "steps" (each is one call to train_single_configuration)
         requested_steps: int = int(runtime_config["n_trials"])
         self.total_steps: int = max(1, requested_steps)
@@ -91,7 +110,9 @@ class IfboOptimizer(Optimizer):
 
         self.logger.info(
             "[IfboOptimizer] Initialized with dynamic candidates, budgets in [%d, %d], "
-            "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f, use_random_selection=%s, greedy_selection=%s",
+            "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f, "
+            "use_random_selection=%s, greedy_selection=%s, "
+            "incumbent_ensemble_top_k=%d, incumbent_ensemble_accuracy_threshold=%.4f",
             self.min_budget,
             self.max_budget,
             self.b_max,
@@ -100,6 +121,8 @@ class IfboOptimizer(Optimizer):
             self.initial_epsilon,
             self.use_random_selection,
             self.greedy_selection,
+            self.incumbent_ensemble_top_k,
+            self.incumbent_ensemble_accuracy_threshold,
         )
 
         # Load FT-PFN surrogate model
@@ -343,28 +366,69 @@ class IfboOptimizer(Optimizer):
                 selected = self._rng.choices(pending, weights=weights, k=1)[0]
         return selected, h_rand
 
+    @staticmethod
+    def _candidate_best_accuracy(c: _IfBOCandidate) -> float:
+        vals = [y for y in c.ys if math.isfinite(y)]
+        return max(vals) if vals else float("-inf")
+
     def _select_incumbent_candidate(self) -> _IfBOCandidate:
         """
         Select the best candidate observed so far, based on maximum accuracy
         across all evaluated budgets.
         """
+        return max(self.candidates, key=self._candidate_best_accuracy)
 
-        def cand_best_y(c: _IfBOCandidate) -> float:
-            vals = [y for y in c.ys if math.isfinite(y)]
-            return max(vals) if vals else float("-inf")
+    def _select_incumbent_candidates(self) -> list[_IfBOCandidate]:
+        """
+        Select up to top-k evaluated incumbents whose best observed validation
+        accuracy is within the configured tolerance of the best incumbent.
+        """
+        evaluated = [
+            c
+            for c in self.candidates
+            if math.isfinite(self._candidate_best_accuracy(c))
+        ]
+        if not evaluated:
+            return []
 
-        return max(self.candidates, key=cand_best_y)
+        ranked = sorted(
+            evaluated,
+            key=self._candidate_best_accuracy,
+            reverse=True,
+        )
+        best_accuracy = self._candidate_best_accuracy(ranked[0])
+        threshold = self.incumbent_ensemble_accuracy_threshold
+        return [
+            c
+            for c in ranked
+            if best_accuracy - self._candidate_best_accuracy(c) <= threshold
+        ][: self.incumbent_ensemble_top_k]
 
-    def _select_incumbent(self) -> Optional[Configuration]:
+    def _select_incumbent(self) -> Optional[Configuration | list[Configuration]]:
         if not any(c.ys for c in self.candidates):
             return None
-        return self._select_incumbent_candidate().config
+        incumbent_candidates = self._select_incumbent_candidates()
+        if not incumbent_candidates:
+            return None
+
+        best_accuracy = self._candidate_best_accuracy(incumbent_candidates[0])
+        self.logger.info(
+            "[IfboOptimizer] Selected %d incumbent(s) for final evaluation "
+            "(best val accuracy=%.4f, top_k=%d, accuracy_threshold=%.4f).",
+            len(incumbent_candidates),
+            best_accuracy,
+            self.incumbent_ensemble_top_k,
+            self.incumbent_ensemble_accuracy_threshold,
+        )
+        if len(incumbent_candidates) == 1:
+            return incumbent_candidates[0].config
+        return [c.config for c in incumbent_candidates]
 
     # -------------------------
     # Main ifBO loop
     # -------------------------
 
-    def _perform_ifbo(self) -> Optional[Configuration]:
+    def _perform_ifbo(self) -> Optional[Configuration | list[Configuration]]:
         """
         Core freeze-thaw loop (Algorithm 1 + MFPI-random acquisition),
         adapted to call `train_single_configuration`.
@@ -403,10 +467,4 @@ class IfboOptimizer(Optimizer):
                     best_acc,
                 )
 
-        best_candidate = self._select_incumbent_candidate()
-        best_acc = max(y for y in best_candidate.ys if math.isfinite(y))
-        self.logger.info(
-            "[IfboOptimizer] Best configuration found with max val accuracy = %.4f",
-            best_acc,
-        )
-        return best_candidate.config
+        return self._select_incumbent()
