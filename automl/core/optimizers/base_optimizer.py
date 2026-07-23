@@ -456,8 +456,8 @@ class Optimizer(ABC):
         )
 
         train_split = DatasetSplit(
-            texts=train_df["text"].tolist()[:10],
-            labels=train_df["label"].tolist()[:10],
+            texts=train_df["text"].tolist(),
+            labels=train_df["label"].tolist(),
         )
         test_split = DatasetSplit(
             texts=test_df["text"].tolist(),
