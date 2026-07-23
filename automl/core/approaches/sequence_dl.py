@@ -267,12 +267,12 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
 
     def prepare(self, train: DatasetSplit, val: DatasetSplit):
         # Hyperparams from config / defaults
-        max_seq_len = self.get_param_value("max_seq_length")
-        embed_dim = self.get_param_value("seq_embed_dim")
-        hidden_dim = self.get_param_value("hidden_dim")
-        num_layers = self.get_param_value("seq_num_layers")
-        dropout = self.get_param_value("dropout")
-        batch_size = self.get_param_value("batch_size", apply_fn=int)
+        max_seq_len = int(self.get_param_value("max_seq_length"))
+        embed_dim = int(self.get_param_value("seq_embed_dim"))
+        hidden_dim = int(self.get_param_value("hidden_dim"))
+        num_layers = int(self.get_param_value("seq_num_layers"))
+        dropout = float(self.get_param_value("dropout"))
+        batch_size = int(self.get_param_value("batch_size"))
 
         # Build vocab on train text
         train_texts = train.texts  # adjust column name as needed

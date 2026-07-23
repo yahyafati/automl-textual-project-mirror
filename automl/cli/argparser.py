@@ -26,6 +26,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     val_size=0.2,
     optimizer="smac",
     num_workers=2,
+    num_parallel_trials=1,
     log_level="INFO",
     use_random_selection=False,
     ifbo_greedy_candidate_selection=False,
@@ -85,6 +86,13 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--num-workers", type=int)
+    parser.add_argument(
+        "--num-parallel-trials",
+        type=int,
+        help="Number of ifBO trials to run concurrently, one per visible "
+        "GPU (or round-robin across GPUs if this exceeds the device "
+        "count). Default: 1 (sequential, today's behavior).",
+    )
     parser.add_argument(
         "--optimizer", choices=["smac", "random", "ifbo", "rl_freeze_thaw"]
     )

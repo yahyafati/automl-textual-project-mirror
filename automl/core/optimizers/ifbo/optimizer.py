@@ -12,8 +12,10 @@ In-Context Freeze-Thaw Bayesian Optimization (ifBO) optimizer.
 from __future__ import annotations
 
 import gc
+import itertools
 import math
 import random
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Optional
 
 import torch
@@ -125,6 +127,58 @@ class IfboOptimizer(Optimizer):
         self.logger.info("[IfboOptimizer] Loading pretrained FT-PFN surrogate...")
         self.model = FTPFN(version="0.0.1", target_path=".model")
 
+        # Assigns each freshly-sampled candidate a stable identity,
+        # independent of its (mutable, tensor-valued) fields, so a
+        # parallel batch can dedupe candidates via a plain `set[int]`
+        # instead of the (unhashable) candidate object itself.
+        self._uid_counter = itertools.count()
+
+        # Number of trials to run concurrently, one per device (or
+        # round-robin across `self.devices` if this exceeds the visible
+        # device count - fine since these models are tiny). Defaults to 1
+        # = today's fully sequential behavior.
+        self._parallelism: int = max(
+            1, int(runtime_config.get("num_parallel_trials", 1))
+        )
+        # Each concurrent trial spawns its own DataLoader worker
+        # subprocesses; divide the configured worker count across
+        # however many trials run at once so parallel runs don't
+        # oversubscribe the machine's CPUs.
+        self._effective_num_workers: int = max(
+            0, int(runtime_config["num_workers"]) // self._parallelism
+        )
+
+        if self._parallelism > 1:
+            self.logger.info(
+                "[IfboOptimizer] Parallel trial execution enabled: "
+                "num_parallel_trials=%d, devices=%s, effective_num_workers=%d",
+                self._parallelism,
+                self.devices,
+                self._effective_num_workers,
+            )
+            self._prewarm_shared_resources(runtime_config)
+
+    def _prewarm_shared_resources(self, runtime_config: RuntimeConfig) -> None:
+        """
+        Load resources that are cached (but not lock-protected) behind a
+        check-then-set the first time they're touched, so the very first
+        parallel batch of trials doesn't race to populate that cache and
+        redundantly repeat expensive work (parsing the full dataset,
+        downloading/loading a pretrained transformer).
+        """
+        self.logger.info("[IfboOptimizer] Prewarming shared caches...")
+        self.dataset.load_data()
+
+        if runtime_config["approach"] == "sequence-dl":
+            from automl.core.approaches.sequence_dl import (
+                SequenceDLApproach,
+                _load_pretrained_word_embeddings,
+                _load_tokenizer,
+            )
+
+            _load_tokenizer(SequenceDLApproach.TOKENIZER_PATH)
+            _load_pretrained_word_embeddings(SequenceDLApproach.EMBEDDING_MODEL_NAME)
+
     # -------------------------
     # Public API
     # -------------------------
@@ -197,7 +251,7 @@ class IfboOptimizer(Optimizer):
     def _sample_new_candidate(self) -> _IfBOCandidate:
         cfg: Configuration = self.space.sample_configuration()
         z = self.hp_space.encode(dict(cfg))
-        cand = _IfBOCandidate(config=cfg, z=z)
+        cand = _IfBOCandidate(config=cfg, z=z, uid=next(self._uid_counter))
         return cand
 
     def _epsilon(self, completed_trials: int) -> float:
@@ -247,22 +301,39 @@ class IfboOptimizer(Optimizer):
             )
         return self.min_budget + step - 1
 
-    def _step(self, cand: _IfBOCandidate, step: int = 1) -> None:
+    def _step(
+        self,
+        cand: _IfBOCandidate,
+        step: int = 1,
+        device: Optional[torch.device] = None,
+        num_workers: Optional[int] = None,
+    ) -> None:
         """
         Thaw `cand` for one or more freeze-thaw steps:
         - Increase its step counter
         - Train for the corresponding epoch budget
         - Record normalized time t and performance y (accuracy) for FT-PFN
+
+        `device`/`num_workers` are forwarded to `train_single_configuration`
+        so a parallel batch can run several `_step` calls concurrently,
+        each pinned to its own device (see `_perform_ifbo`).
         """
         cand.steps_done = min(cand.steps_done + step, self.b_max)
         budget = self._step_to_budget(cand.steps_done)
 
-        # Derive a seed for this evaluation (for reproducibility yet variability)
-        seed = self._rng.randint(1, 2**31 - 1)
+        # Derive a seed for this evaluation (for reproducibility yet
+        # variability). `self._rng` is shared process-wide, so guard the
+        # draw itself when multiple `_step` calls may run concurrently.
+        with self._state_lock:
+            seed = self._rng.randint(1, 2**31 - 1)
 
         # train_single_configuration returns val_error = 1 - val_accuracy
         val_error = self.train_single_configuration(
-            config=cand.config, seed=seed, budget=float(budget)
+            config=cand.config,
+            seed=seed,
+            budget=float(budget),
+            device=device,
+            num_workers=num_workers,
         )
         # In case of failure val_error may be NaN
         if math.isnan(val_error):
@@ -276,6 +347,25 @@ class IfboOptimizer(Optimizer):
         cand.ts.append(t)
         cand.ys.append(y)
 
+    def _step_on_device(
+        self,
+        cand: _IfBOCandidate,
+        step: int,
+        device: torch.device,
+        num_workers: int,
+    ) -> None:
+        """
+        Entry point submitted to the parallel-trial thread pool. PyTorch's
+        "current CUDA device" is thread-local, not inherited from the
+        thread that created the pool, so any implicit current-device op
+        inside training (e.g. `torch.cuda.empty_cache()` in
+        TorchTrainer.train's cleanup) would silently target device 0
+        unless this thread's current device is set explicitly first.
+        """
+        if device.type == "cuda":
+            torch.cuda.set_device(device)
+        self._step(cand, step, device=device, num_workers=num_workers)
+
     def _best_so_far_accuracy(self) -> float:
         ys: list[float] = []
         for c in self.candidates:
@@ -285,7 +375,10 @@ class IfboOptimizer(Optimizer):
         return max(ys) if ys else 0.0
 
     def _select_next_candidate(
-        self, context: list[Curve], completed_trials: int
+        self,
+        context: list[Curve],
+        completed_trials: int,
+        exclude: Optional[set[int]] = None,
     ) -> tuple[_IfBOCandidate, int]:
         """
         Dynamic epsilon-greedy MFPI-random acquisition:
@@ -299,6 +392,14 @@ class IfboOptimizer(Optimizer):
         - For each pending existing candidate, query FT-PFN at time
           t' = (steps_done + h_rand)/b_max
         - Then advance the selected candidate by h_rand freeze-thaw steps.
+
+        `exclude` holds `uid`s of candidates already picked earlier in the
+        same parallel batch (see IfboOptimizer's parallel-trial loop) -
+        excluding them prevents two concurrently-running trials from
+        thawing the very same candidate at once, which would race on its
+        `.steps_done`/`.ts`/`.ys` mutation and its trainer checkpoint file.
+        Newly-sampled candidates never need this check since each gets a
+        fresh, unique `uid`.
         """
         if not self.candidates:
             self.logger.debug("No Candidates, sampling a new one.")
@@ -314,8 +415,11 @@ class IfboOptimizer(Optimizer):
             self.candidates.append(candidate)
             return candidate, 1
 
+        excluded_uids = exclude or set()
         pending: list[_IfBOCandidate] = [
-            c for c in self.candidates if c.steps_done < self.b_max
+            c
+            for c in self.candidates
+            if c.steps_done < self.b_max and c.uid not in excluded_uids
         ]
         if not pending:
             self.logger.debug("No pending candidates, sampling a new one.")
@@ -440,6 +544,13 @@ class IfboOptimizer(Optimizer):
             self.total_steps,
         )
 
+        if self._parallelism > 1:
+            return self._perform_ifbo_parallel()
+        return self._perform_ifbo_sequential()
+
+    def _perform_ifbo_sequential(
+        self,
+    ) -> Optional[Configuration | list[Configuration]]:
         used_steps = 0
 
         while used_steps < self.total_steps:
@@ -480,5 +591,102 @@ class IfboOptimizer(Optimizer):
                     self.total_steps,
                     best_acc,
                 )
+
+        return self._select_incumbent()
+
+    def _perform_ifbo_parallel(
+        self,
+    ) -> Optional[Configuration | list[Configuration]]:
+        """
+        Batch-synchronous variant of `_perform_ifbo_sequential`: each round
+        selects up to `self._parallelism` *distinct* candidates using the
+        context built from the latest completed state (candidates 2..N
+        within a round are picked against the same context as candidate 1
+        - standard batch-BO staleness, not a bug), dispatches them
+        concurrently across `self.devices` (round-robin if
+        `self._parallelism` exceeds the device count), and waits for the
+        whole round before building the next context.
+        """
+        used_steps = 0
+
+        with ThreadPoolExecutor(max_workers=self._parallelism) as executor:
+            while used_steps < self.total_steps:
+                context = self._build_context()
+                round_size = min(self._parallelism, self.total_steps - used_steps)
+
+                batch: list[tuple[_IfBOCandidate, int]] = []
+                selected_uids: set[int] = set()
+                for _ in range(round_size):
+                    cand, steps = self._select_next_candidate(
+                        context, used_steps + 1, exclude=selected_uids
+                    )
+                    if cand.steps_done >= self.b_max:
+                        break
+                    selected_uids.add(cand.uid)
+                    batch.append((cand, steps))
+
+                del context
+
+                if not batch:
+                    self.logger.info(
+                        "[IfboOptimizer] All candidates reached max steps. "
+                        "Stopping early at used_steps=%d.",
+                        used_steps,
+                    )
+                    break
+
+                self.logger.debug(
+                    "[IfboOptimizer] Dispatching round of %d candidate(s): %s",
+                    len(batch),
+                    [(c.config, s) for c, s in batch],
+                )
+
+                futures: list[Future] = [
+                    executor.submit(
+                        self._step_on_device,
+                        cand,
+                        steps,
+                        self.devices[i % len(self.devices)],
+                        self._effective_num_workers,
+                    )
+                    for i, (cand, steps) in enumerate(batch)
+                ]
+
+                try:
+                    for fut in futures:
+                        try:
+                            fut.result()
+                        except Exception:
+                            self.logger.error(
+                                "[IfboOptimizer] Unexpected error in parallel "
+                                "ifBO worker.",
+                                exc_info=True,
+                            )
+                except KeyboardInterrupt:
+                    # SIGINT only reaches the main thread; in-flight GPU
+                    # work in this round still has to finish (threads
+                    # can't be force-killed), but drop anything not yet
+                    # started so we don't queue further rounds.
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise
+
+                used_steps += len(batch)
+
+                # --- MEMORY CLEANUP: once per round, not once per trial ---
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                if torch.mps.is_available():
+                    torch.mps.empty_cache()
+                # ------------------------------------------------------------
+
+                if used_steps % 25 == 0 or used_steps == self.total_steps:
+                    best_acc = self._best_so_far_accuracy()
+                    self.logger.info(
+                        "[IfboOptimizer] step %4d/%4d | best-so-far accuracy = %.4f",
+                        used_steps,
+                        self.total_steps,
+                        best_acc,
+                    )
 
         return self._select_incumbent()

@@ -29,6 +29,11 @@ class RuntimeConfig(TypedDict):
     num_workers: int
     optimizer: str
 
+    # Number of ifBO trials to run concurrently (one per device, or
+    # round-robin across devices if this exceeds the number of visible
+    # GPUs). Defaults to 1 = today's fully sequential behavior.
+    num_parallel_trials: int
+
     log_level: str
 
     use_random_selection: bool

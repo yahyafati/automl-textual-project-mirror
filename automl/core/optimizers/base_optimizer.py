@@ -1,5 +1,6 @@
 import hashlib
 import json
+import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
@@ -45,11 +46,24 @@ class Optimizer(ABC):
         self.logger.info(f"Selected seed: {runtime_config['seed']}")
         self.logger.info(f"Current runtime_id: {runtime_config['runtime_id']}")
 
-        self.device = (
-            get_device()
-            if runtime_config["device"] == "auto"
-            else torch.device(runtime_config["device"])
-        )
+        # `self.devices` is the full pool of devices available for
+        # concurrent trial execution (see IfboOptimizer's parallel-trial
+        # loop); `self.device` stays as the single "default" device so
+        # every existing single-device call site keeps working unchanged.
+        self.devices: list[torch.device] = self._resolve_devices(runtime_config)
+        self.device = self.devices[0]
+
+        # Guards shared mutable state (self.history, self.trial_no,
+        # self.best_val_error, self.highest_budget_seen, the "best"
+        # checkpoint) when multiple trials run concurrently across
+        # threads. A no-op (uncontended) when only one trial runs at a
+        # time, so it's always safe to hold.
+        self._state_lock = threading.Lock()
+        # Per-config-id locks, created lazily under `_state_lock`, so two
+        # concurrent trials that happen to share a config hash don't
+        # corrupt each other's trainer checkpoint file.
+        self._checkpoint_locks: dict[str, threading.Lock] = {}
+
         self.dataset = get_dataset_class(runtime_config["dataset"])(
             runtime_config["data_path"]
         )
@@ -80,6 +94,30 @@ class Optimizer(ABC):
 
         register_all_approaches()
         set_seed(runtime_config["seed"])
+
+    @staticmethod
+    def _resolve_devices(runtime_config: RuntimeConfig) -> list[torch.device]:
+        """
+        Enumerate the devices available for (potentially concurrent) trial
+        execution. An explicit `device` in the runtime config is always
+        honored as a single device; "auto" expands to every visible CUDA
+        device so callers that support parallel trials (see
+        IfboOptimizer) can dispatch one trial per GPU, falling back to the
+        single best device (mps/cpu) otherwise.
+        """
+        if runtime_config["device"] != "auto":
+            return [torch.device(runtime_config["device"])]
+
+        if torch.cuda.is_available():
+            return [
+                torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())
+            ]
+
+        return [get_device()]
+
+    def _checkpoint_lock_for(self, config_id: str) -> threading.Lock:
+        with self._state_lock:
+            return self._checkpoint_locks.setdefault(config_id, threading.Lock())
 
     @abstractmethod
     def run(self):
@@ -308,9 +346,20 @@ class Optimizer(ABC):
         config: Configuration,
         seed: int,
         budget: float,
+        device: Optional[torch.device] = None,
+        num_workers: Optional[int] = None,
     ) -> float:
         """
         Train a single configuration for a given budget.
+
+        `device`/`num_workers` default to the optimizer's configured
+        single device/worker count, but can be overridden per call so
+        multiple trials can be dispatched concurrently across different
+        devices (see IfboOptimizer's parallel-trial loop). Callers that
+        run several of these concurrently on separate threads are
+        responsible for calling `torch.cuda.set_device(device)` first, so
+        that any implicit "current device" op (e.g. CUDA cache clearing
+        inside the trainer) targets the right GPU.
 
         Returns
         -------
@@ -319,25 +368,34 @@ class Optimizer(ABC):
         """
         from automl.core.utils import timer
 
+        device = device or self.device
+        num_workers = (
+            self.runtime_config["num_workers"] if num_workers is None else num_workers
+        )
+
         model_type = config["model_type"]
         config_id = self._config_to_hash_id(config)
         config_dict = dict(config)  # avoid mutating original
         config_dict["epochs"] = int(budget)
-        self.trial_no += 1
 
         train_fraction = 1.0
         max_num_rows = int(self.runtime_config["max_num_rows"])
 
+        val_error = float("nan")
         try:
-            set_seed(seed)
+            with self._state_lock:
+                self.trial_no += 1
+                trial_no = self.trial_no
+
             self.logger.info(
-                f"[{self.__class__.__name__}] Trial #{self.trial_no}/"
+                f"[{self.__class__.__name__}] Trial #{trial_no}/"
                 f"{self.runtime_config['n_trials']}, "
                 f"Config ID: {config_id}, "
                 f"Budget: {budget}, "
                 f"Train Fraction: {train_fraction:.2f}, "
                 f"Seed: {seed}, "
-                f"Approach: {model_type}"
+                f"Approach: {model_type}, "
+                f"Device: {device}"
             )
 
             val_size = self.runtime_config["val_size"]
@@ -366,59 +424,85 @@ class Optimizer(ABC):
             approach = get_approach(model_type)(
                 config_dict,
                 data_info["num_classes"],
-                self.device,
-                num_workers=self.runtime_config["num_workers"],
+                device,
+                num_workers=num_workers,
             )
 
-            with timer.Timer() as t:
-                with approach.with_mode("train") as _approach:
+            with approach.with_mode("train") as _approach:
+                # `set_seed` reseeds process-global RNGs (torch/numpy/
+                # random). `approach.prepare()` builds the model, whose
+                # default weight init draws from that same global torch
+                # RNG before the model is moved to `device` - so the two
+                # must run back-to-back without another thread's
+                # `set_seed` call interleaving, or a concurrently-running
+                # trial could end up seeded by the wrong seed. Data
+                # loading above doesn't need this protection: both
+                # `train_test_split` and the uniform-sampling helper use
+                # their own locally-seeded RandomState, not the global
+                # RNG.
+                with self._state_lock:
+                    set_seed(seed)
                     prepared_result = _approach.prepare(train_split, val_split)
-                    trainer_checkpoint_path = self._trainer_checkpoint_path(config_id)
+
+                with timer.Timer() as t:
+                    checkpoint_lock = self._checkpoint_lock_for(config_id)
+                    with checkpoint_lock:
+                        trainer_checkpoint_path = self._trainer_checkpoint_path(
+                            config_id
+                        )
+                        load_kwargs = self._trainer_load_kwargs(
+                            trainer_checkpoint_path
+                        )
                     result = _approach.train(
                         prepared_result,
                         epochs=int(budget),
-                        **self._trainer_load_kwargs(trainer_checkpoint_path),
+                        **load_kwargs,
                     )
-                    self._save_trainer_checkpoint(config_id, _approach.trainer)
+                    with checkpoint_lock:
+                        self._save_trainer_checkpoint(config_id, _approach.trainer)
+
             execution_time = t.execution_time
             val_error = 1.0 - result["val_accuracy"]
 
-            # TODO: Maybe we don't need this
-            # if budget > self.highest_budget_seen:
-            #     self.highest_budget_seen = budget
-            #     self.best_val_error = float("inf")
+            with self._state_lock:
+                # TODO: Maybe we don't need this
+                # if budget > self.highest_budget_seen:
+                #     self.highest_budget_seen = budget
+                #     self.best_val_error = float("inf")
 
-            is_best_yet = (
-                budget >= self.highest_budget_seen and val_error < self.best_val_error
-            )
-
-            # Save best model checkpoint
-            if is_best_yet:
-                self.best_val_error = val_error
-                approach.save(self.checkpoint_dir, replace_best=True)
-                self.logger.info(
-                    f"[{self.__class__.__name__}] New best model with "
-                    f"val acc={result['val_accuracy']:.4f}"
+                is_best_yet = (
+                    budget >= self.highest_budget_seen
+                    and val_error < self.best_val_error
                 )
 
-            self.highest_budget_seen = max(self.highest_budget_seen, budget)
+                # Save best model checkpoint
+                if is_best_yet:
+                    self.best_val_error = val_error
+                    approach.save(self.checkpoint_dir, replace_best=True)
+                    self.logger.info(
+                        f"[{self.__class__.__name__}] New best model with "
+                        f"val acc={result['val_accuracy']:.4f}"
+                    )
 
-            trial_result: TrialResult = TrialResult(
-                config=dict(config),
-                seed=seed,
-                budget=budget,
-                trialNo=self.trial_no,
-                execution_time=execution_time or float("nan"),
-                timestamp=datetime.now().strftime("%Y%m%d_%H%M%S,%f"),
-                val_error=val_error,
-                best_so_far=is_best_yet,
-                epoch_history=result["history"],
-            )
-            self.history.append(trial_result)
+                self.highest_budget_seen = max(self.highest_budget_seen, budget)
+
+                trial_result: TrialResult = TrialResult(
+                    config=dict(config),
+                    seed=seed,
+                    budget=budget,
+                    trialNo=trial_no,
+                    execution_time=execution_time or float("nan"),
+                    timestamp=datetime.now().strftime("%Y%m%d_%H%M%S,%f"),
+                    val_error=val_error,
+                    best_so_far=is_best_yet,
+                    epoch_history=result["history"],
+                )
+                self.history.append(trial_result)
+
             self._append_trial_to_jsonl(trial_result)
 
             self.logger.info(
-                f"[{self.__class__.__name__}] Trial #{self.trial_no} "
+                f"[{self.__class__.__name__}] Trial #{trial_no} "
                 f"completed (val_error={val_error:.4f})."
             )
 
