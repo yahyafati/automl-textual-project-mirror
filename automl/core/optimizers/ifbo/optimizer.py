@@ -140,12 +140,25 @@ class IfboOptimizer(Optimizer):
         self._parallelism: int = max(
             1, int(runtime_config.get("num_parallel_trials", 1))
         )
-        # Each concurrent trial spawns its own DataLoader worker
-        # subprocesses; divide the configured worker count across
-        # however many trials run at once so parallel runs don't
-        # oversubscribe the machine's CPUs.
-        self._effective_num_workers: int = max(
-            0, int(runtime_config["num_workers"]) // self._parallelism
+        # DataLoader(num_workers>0) spawns its worker subprocesses via
+        # os.fork() on the platform default ("fork") multiprocessing
+        # context (i.e. on Linux - macOS/Windows default to "spawn",
+        # which doesn't call os.fork() at all). filelock (Python 3.12+)
+        # actively refuses to let a fork happen while *any* FileLock in
+        # the process is mid-acquire/release - and with several trials
+        # running concurrently, one thread can easily be inside
+        # `_append_trial_to_jsonl`'s FileLock exactly when another
+        # thread's DataLoader tries to fork, raising "os.fork is unsafe
+        # while filelock is changing descriptor ownership". Rather than
+        # just dividing the worker count down (which still forks, just
+        # less often), force it to 0 whenever trials run concurrently -
+        # data loading stays in each trial's own thread instead, which
+        # sidesteps forking (and this whole class of issue) entirely.
+        # Tokenization already happens once upfront in
+        # TextSequenceDataset.__init__, not per-batch, so the throughput
+        # cost of losing DataLoader workers here is small.
+        self._effective_num_workers: int = (
+            0 if self._parallelism > 1 else int(runtime_config["num_workers"])
         )
 
         if self._parallelism > 1:

@@ -12,7 +12,8 @@ n_trials: 50
 optimizer: ifbo  # use rl_freeze_thaw for the PPO Freeze--Thaw scheduler
 
 approach: sequence-dl
-num_workers: 2 # TODO: I don't think this is being properly used
+num_workers: 1 # TODO: I don't think this is being properly used
+num_parallel_trials: 2
 max_num_rows: 50000
 val_size: 0.2
 
