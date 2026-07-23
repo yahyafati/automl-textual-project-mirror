@@ -11,6 +11,7 @@ In-Context Freeze-Thaw Bayesian Optimization (ifBO) optimizer.
 
 from __future__ import annotations
 
+import gc
 import math
 import random
 from typing import Optional
@@ -343,12 +344,17 @@ class IfboOptimizer(Optimizer):
                 )
             )
 
-        predictions = self.model.predict(context=context, query=query)
-        # Each PredictionResult has .pi(threshold) -> probability of improvement
-        T_tensor = torch.tensor(T_rand, dtype=torch.float32)
-        pi_scores = torch.stack([pred.pi(T_tensor).squeeze() for pred in predictions])
-        pi_scores = torch.nan_to_num(pi_scores.float(), nan=0.0, posinf=0.0, neginf=0.0)
-        pi_scores = torch.clamp(pi_scores, min=0.0)
+        # Wrap predictions in no_grad to drastically reduce memory usage
+        with torch.no_grad():
+            predictions = self.model.predict(context=context, query=query)
+            T_tensor = torch.tensor(T_rand, dtype=torch.float32)
+            pi_scores = torch.stack(
+                [pred.pi(T_tensor).squeeze() for pred in predictions]
+            )
+            pi_scores = torch.nan_to_num(
+                pi_scores.float(), nan=0.0, posinf=0.0, neginf=0.0
+            )
+            pi_scores = torch.clamp(pi_scores, min=0.0)
 
         if self.greedy_selection:
             idx = torch.argmax(pi_scores)
@@ -356,6 +362,10 @@ class IfboOptimizer(Optimizer):
         else:
             weights = torch.softmax(pi_scores, dim=0).tolist()
             selected = self._rng.choices(pending, weights=weights, k=1)[0]
+
+        # Free inference-related variables right away
+        del query, predictions, T_tensor
+
         return selected, h_rand
 
     @staticmethod
@@ -435,6 +445,10 @@ class IfboOptimizer(Optimizer):
         while used_steps < self.total_steps:
             context = self._build_context()
             next_cand, steps = self._select_next_candidate(context, used_steps + 1)
+
+            # Delete context early since we no longer need it for this step
+            del context
+
             if next_cand.steps_done >= self.b_max:
                 self.logger.info(
                     "[IfboOptimizer] All candidates reached max steps. "
@@ -449,6 +463,14 @@ class IfboOptimizer(Optimizer):
             )
             self._step(next_cand, steps)
             used_steps += 1
+
+            # --- MEMORY CLEANUP: Clear resources tied up by the training step ---
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if torch.mps.is_available():
+                torch.mps.empty_cache()
+            # --------------------------------------------------------------------
 
             if used_steps % 25 == 0 or used_steps == self.total_steps:
                 best_acc = self._best_so_far_accuracy()
