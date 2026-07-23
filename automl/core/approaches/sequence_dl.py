@@ -305,6 +305,8 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         weight_decay = self.get_param_value("weight_decay")
 
         scheduler = self.get_param_value("scheduler")
+        warmup_ratio = float(self.get_param_value("warmup_ratio"))
+        max_grad_norm = float(self.get_param_value("max_grad_norm"))
 
         optimizer_args = {"lr": lr, "weight_decay": weight_decay}
 
@@ -323,6 +325,8 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
                 scheduler=scheduler,
                 epochs=epochs,
                 evaluate_validation=evaluate_validation,
+                max_grad_norm=max_grad_norm,
+                warmup_ratio=warmup_ratio,
             )
             self.trainer = trainer
 

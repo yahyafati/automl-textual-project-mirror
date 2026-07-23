@@ -56,6 +56,8 @@ class TorchTrainer(Trainer):
         scheduler_args: Optional[dict] = None,
         epochs: int = 5,
         evaluate_validation: bool = True,
+        max_grad_norm: Optional[float] = None,
+        warmup_ratio: float = 0.0,
     ):
         super().__init__(approach_name)
         self.model = model
@@ -64,8 +66,15 @@ class TorchTrainer(Trainer):
         self.device = device
         self.epochs = epochs
         self.evaluate_validation = evaluate_validation
+        self.max_grad_norm = max_grad_norm
 
         self.optimizer = self.create_optimizer(self.model, optimizer, optimizer_args)
+        # Snapshot the target LR per param group *before* warmup starts
+        # scaling it down, so we know what to warm up towards/back to.
+        self._base_lrs = [group["lr"] for group in self.optimizer.param_groups]
+        self.warmup_epochs = (
+            int(round(warmup_ratio * epochs)) if warmup_ratio > 0 else 0
+        )
         self.scheduler = self.create_scheduler(
             self.optimizer, scheduler, scheduler_args, epochs
         )
@@ -202,6 +211,8 @@ class TorchTrainer(Trainer):
         self.optimizer.zero_grad()
         loss = self._compute_loss(batch)
         loss.backward()
+        if self.max_grad_norm is not None:
+            nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
         self.optimizer.step()
 
         return loss.item()
@@ -316,6 +327,15 @@ class TorchTrainer(Trainer):
             for epoch in range(self.start_epoch, self.epochs):
                 logger.debug(f"--- Epoch {epoch + 1}/{self.epochs} ---")
                 self._current_epoch = epoch
+
+                in_warmup = epoch < self.warmup_epochs
+                if in_warmup:
+                    warmup_factor = (epoch + 1) / self.warmup_epochs
+                    for group, base_lr in zip(
+                        self.optimizer.param_groups, self._base_lrs
+                    ):
+                        group["lr"] = base_lr * warmup_factor
+
                 avg_loss = self._run_epoch()
 
                 logger.debug(f"Epoch {epoch + 1} complete. Train Loss: {avg_loss:.4f}")
@@ -343,7 +363,9 @@ class TorchTrainer(Trainer):
                     )
                 )
 
-                if self.scheduler is not None:
+                # Hold the main scheduler off until warmup has finished so it
+                # doesn't immediately override the warmed-up LR.
+                if self.scheduler is not None and not in_warmup:
                     if isinstance(self.scheduler, ReduceLROnPlateau):
                         metric = val_acc if val_acc is not None else avg_loss
                         self.scheduler.step(metric)

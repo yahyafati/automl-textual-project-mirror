@@ -96,6 +96,8 @@ SEQUENCE_DL_DEFAULT_CONFIG = {
     "weight_decay": 0.0,
     "seq_num_filters": 1,
     "seq_kernel_pattern": "3",
+    "warmup_ratio": 0.1,
+    "max_grad_norm": 1.0,
 }
 
 DEFAULT_BPE_LSTM = {

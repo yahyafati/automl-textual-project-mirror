@@ -213,9 +213,16 @@ def build_config_space(
                 transformer_learning_rate,
                 transformer_batch_size,
                 freeze_transformer,
-                warmup_ratio,
             ]
         )
+
+    # warmup_ratio is shared between transformer and sequence-dl (LSTM cold
+    # starts benefit from it just as much as transformer fine-tuning does)
+    warmup_models = [
+        m for m in ["transformer", "sequence-dl"] if m in allowed_model_types
+    ]
+    if warmup_models:
+        cs.add([warmup_ratio])
 
     if "sequence-dl" in allowed_model_types:
         cs.add(
@@ -277,9 +284,11 @@ def build_config_space(
                 EqualsCondition(transformer_learning_rate, model_type, "transformer"),
                 EqualsCondition(transformer_batch_size, model_type, "transformer"),
                 EqualsCondition(freeze_transformer, model_type, "transformer"),
-                EqualsCondition(warmup_ratio, model_type, "transformer"),
             ]
         )
+
+    if warmup_models:
+        conditions.append(InCondition(warmup_ratio, model_type, warmup_models))
 
     # Sequence-dl branch
     if "sequence-dl" in allowed_model_types:
