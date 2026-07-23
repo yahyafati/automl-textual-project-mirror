@@ -9,6 +9,7 @@ class RuntimeConfig(TypedDict):
     """Custom TypedDict mapping to configuration parameters."""
 
     runtime_id: str
+    device: str
     dataset: str
     output_path: Path
     load_path: Optional[Path]

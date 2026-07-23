@@ -4,7 +4,7 @@ from typing import Union, TypedDict, Any
 
 from ConfigSpace import Configuration
 
-from automl.core.types import TrainResult
+from automl.core.types import TrainResult, EvaluationResult
 from automl.logger import get_logger
 
 logger = get_logger()
@@ -60,6 +60,9 @@ def numpy_and_config_encoder(obj):
         return int(obj)
     if isinstance(obj, (np.floating, float)):
         return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
@@ -77,7 +80,7 @@ def _serialize_config(config: Configuration) -> dict:
 
 class SavedIncumbent(TypedDict):
     incumbent: Configuration
-    evaluation_result: TrainResult
+    evaluation_result: EvaluationResult
 
 
 def save_incumbent(

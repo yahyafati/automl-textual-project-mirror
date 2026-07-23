@@ -46,11 +46,6 @@ class IfboOptimizer(Optimizer):
 
     def __init__(self, runtime_config: RuntimeConfig):
         super().__init__(runtime_config)
-
-        # Optional: load base data once, if supported by the dataset
-        if hasattr(self.dataset, "load_base_data"):
-            self.dataset.load_base_data()
-
         self._rng = random.Random(runtime_config["seed"])
 
         self.min_budget: int = int(runtime_config["min_budget"])

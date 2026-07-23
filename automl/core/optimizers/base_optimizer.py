@@ -7,6 +7,7 @@ from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
+import torch
 from ConfigSpace import Configuration, ConfigurationSpace
 from filelock import FileLock
 
@@ -16,7 +17,13 @@ from automl.core.approaches.base_approach import Approach
 from automl.core.datasets import get_dataset_class
 from automl.core.registry import get_approach, register_all_approaches
 from automl.core.trainers.base_trainer import Trainer
-from automl.core.types import DatasetSplit, TrialResult, ApproachName, TrainResult
+from automl.core.types import (
+    DatasetSplit,
+    TrialResult,
+    ApproachName,
+    TrainResult,
+    EvaluationResult,
+)
 from automl.core.utils.misc import SavedIncumbent
 from automl.core.utils.misc import (
     get_device,
@@ -38,7 +45,11 @@ class Optimizer(ABC):
         self.logger.info(f"Selected seed: {runtime_config['seed']}")
         self.logger.info(f"Current runtime_id: {runtime_config['runtime_id']}")
 
-        self.device = get_device()
+        self.device = (
+            get_device()
+            if runtime_config["device"] == "auto"
+            else torch.device(runtime_config["device"])
+        )
         self.dataset = get_dataset_class(runtime_config["dataset"])(
             runtime_config["data_path"]
         )
@@ -106,7 +117,7 @@ class Optimizer(ABC):
         if incumbent:
             # Held-out Test Evaluation
             if isinstance(incumbent, Configuration):
-                result = self.evaluate_incumbent(incumbent)
+                result: EvaluationResult = self.evaluate_incumbent(incumbent)
 
                 save_incumbent(
                     incumbent=SavedIncumbent(
@@ -126,12 +137,15 @@ class Optimizer(ABC):
                         if has_multiple_incumbents
                         else "predictions.npy"
                     )
+                    evaluation_result = self.evaluate_incumbent(
+                        incumbent_,
+                        predictions_filename=predictions_filename,
+                    )
+                    result, prediction_result = (
+                        evaluation_result["train_result"],
+                        evaluation_result["prediction_result"],
+                    )
                     if has_multiple_incumbents:
-                        result, prediction_result = self.evaluate_incumbent(
-                            incumbent_,
-                            predictions_filename=predictions_filename,
-                            return_predictions=True,
-                        )
                         incumbent_predictions.append(prediction_result["y_pred"])
                         incumbent_labels = prediction_result["y_true"]
                         if heldout_labels is None:
@@ -141,15 +155,10 @@ class Optimizer(ABC):
                                 "Cannot compute ensemble accuracy because incumbent "
                                 "evaluations used different held-out labels."
                             )
-                    else:
-                        result = self.evaluate_incumbent(
-                            incumbent_,
-                            predictions_filename=predictions_filename,
-                        )
                     saved_incumbents.append(
                         {
                             "incumbent": incumbent_,
-                            "evaluation_result": result,
+                            "evaluation_result": evaluation_result,
                         }
                     )
                 if has_multiple_incumbents:
@@ -425,11 +434,8 @@ class Optimizer(ABC):
         return val_error
 
     def evaluate_incumbent(
-        self,
-        incumbent: Configuration,
-        predictions_filename: str = "predictions.npy",
-        return_predictions: bool = False,
-    ):
+        self, incumbent: Configuration, predictions_filename: str = "predictions.npy"
+    ) -> EvaluationResult:
         """Same evaluation protocol as SmacOptimizer."""
         epochs = self.runtime_config["evaluation_budget"]
 
@@ -450,8 +456,8 @@ class Optimizer(ABC):
         )
 
         train_split = DatasetSplit(
-            texts=train_df["text"].tolist(),
-            labels=train_df["label"].tolist(),
+            texts=train_df["text"].tolist()[:10],
+            labels=train_df["label"].tolist()[:10],
         )
         test_split = DatasetSplit(
             texts=test_df["text"].tolist(),
@@ -471,7 +477,12 @@ class Optimizer(ABC):
         with approach.with_mode("eval") as _approach:
             prepared = _approach.prepare(train_split, test_split)
             # TODO: evaluate validation now only works in sequence-dl
-            train_result = _approach.train(prepared, epochs=epochs, evaluate_validation=should_evaluate)
+            train_result = _approach.train(
+                prepared, epochs=epochs, evaluate_validation=should_evaluate
+            )
+            self.logger.info(
+                "Predicting for test set"
+            )
             prediction_result = _approach.predict(test_df)
 
         self.logger.info(
@@ -483,6 +494,6 @@ class Optimizer(ABC):
             filename=predictions_filename,
         )
 
-        if return_predictions:
-            return train_result, prediction_result
-        return train_result
+        return EvaluationResult(
+            train_result=train_result, prediction_result=prediction_result
+        )

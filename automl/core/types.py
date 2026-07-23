@@ -46,14 +46,19 @@ class EpochResult(TypedDict):
     val_accuracy: Optional[float]
 
 
+class PredictionResult(TypedDict):
+    y_pred: np.ndarray
+    y_true: np.ndarray
+
+
 class TrainResult(TypedDict):
     val_accuracy: float
     history: List[EpochResult]
 
 
-class PredictionResult(TypedDict):
-    y_pred: np.ndarray
-    y_true: np.ndarray
+class EvaluationResult(TypedDict):
+    train_result: TrainResult
+    prediction_result: PredictionResult
 
 
 class TrialResult(TypedDict):

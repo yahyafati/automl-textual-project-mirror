@@ -10,6 +10,7 @@ from automl.cli.types import RuntimeConfig
 
 DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     runtime_id="",
+    device="auto",
     dataset="amazon",
     output_path=Path("results"),
     load_path=None,
@@ -43,6 +44,7 @@ def create_parser() -> argparse.ArgumentParser:
         type=str,
         choices=["ag_news", "imdb", "amazon", "dbpedia", "yelp"],
     )
+    parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--output-path", type=Path)
     parser.add_argument("--load-path", type=Path)
     parser.add_argument("--data-path", type=Path)
