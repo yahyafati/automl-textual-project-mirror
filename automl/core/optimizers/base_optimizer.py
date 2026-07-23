@@ -430,19 +430,31 @@ class Optimizer(ABC):
 
             with approach.with_mode("train") as _approach:
                 # `set_seed` reseeds process-global RNGs (torch/numpy/
-                # random). `approach.prepare()` builds the model, whose
-                # default weight init draws from that same global torch
-                # RNG before the model is moved to `device` - so the two
-                # must run back-to-back without another thread's
-                # `set_seed` call interleaving, or a concurrently-running
-                # trial could end up seeded by the wrong seed. Data
-                # loading above doesn't need this protection: both
+                # random); `approach.prepare()` builds the model (default
+                # weight init draws from that same global torch RNG). Only
+                # `set_seed` itself is locked - it's a handful of cheap
+                # calls, so making it atomic avoids two threads' seeding
+                # statements literally interleaving mid-call. `prepare()`
+                # is deliberately NOT under the lock even though it reads
+                # RNG state right after: it also does the expensive,
+                # CPU-bound work (tokenizing the whole corpus, building
+                # the model, PCA-projecting a pretrained embedding matrix
+                # for sequence-dl) - serializing that behind a lock starved
+                # every GPU but one of any work to do, since with N
+                # threads only one can be inside `prepare()` at a time.
+                # Net effect: with `num_parallel_trials > 1`, exact
+                # "same seed -> same result" reproducibility no longer
+                # holds (a concurrently-running trial's `set_seed` can
+                # land between this trial's seeding and its weight init) -
+                # already an accepted trade-off, since ifBO treats
+                # observed accuracy as noisy regardless. Data loading
+                # doesn't need any of this protection: both
                 # `train_test_split` and the uniform-sampling helper use
                 # their own locally-seeded RandomState, not the global
                 # RNG.
                 with self._state_lock:
                     set_seed(seed)
-                    prepared_result = _approach.prepare(train_split, val_split)
+                prepared_result = _approach.prepare(train_split, val_split)
 
                 with timer.Timer() as t:
                     checkpoint_lock = self._checkpoint_lock_for(config_id)

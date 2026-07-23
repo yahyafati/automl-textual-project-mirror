@@ -1,3 +1,4 @@
+import threading
 from functools import lru_cache, partial
 from pathlib import Path
 from typing import Union, Optional
@@ -16,18 +17,32 @@ from automl.core.trainers.torch_trainer import TorchTrainer
 from automl.core.types import DatasetSplit, TrainResult, PredictionResult
 
 
-@lru_cache(maxsize=1)
+_tokenizer_cache = threading.local()
+
+
 def _load_tokenizer(path: str) -> PreTrainedTokenizerBase:
-    """Load (and cache) the tokenizer once per process.
+    """Load (and cache) one tokenizer instance per THREAD.
 
     `prepare()` is called once per hyperparameter-optimization trial (the
-    ifBO loop in optimizer.py can run hundreds of these), and previously
-    each call re-read the tokenizer from disk and allocated a brand new
-    vocab/merges table. The tokenizer is stateless w.r.t. encoding, so it's
-    safe to reuse the same instance across trials instead of paying for a
-    fresh copy every time.
+    ifBO loop in optimizer.py can run hundreds of these), so reusing a
+    tokenizer instead of re-reading it from disk every call matters. This
+    used to be a single `lru_cache`-wrapped instance shared by the whole
+    process, which is safe as long as calls are sequential - but a fast
+    (Rust-backed) tokenizer's `__call__` mutates its own truncation/padding
+    config in place first (`max_length` varies per trial's sampled
+    `max_seq_length`), so two trials tokenizing concurrently on separate
+    threads (see IfboOptimizer's parallel-trial loop) race on that shared
+    mutable state and crash with `RuntimeError: Already borrowed`. Caching
+    one instance per thread instead keeps the "load once, reuse many
+    times" benefit within a thread while giving each concurrently-running
+    trial its own private tokenizer to mutate.
     """
-    return AutoTokenizer.from_pretrained(path)
+    cached = getattr(_tokenizer_cache, "tokenizer", None)
+    if cached is None or getattr(_tokenizer_cache, "path", None) != path:
+        cached = AutoTokenizer.from_pretrained(path)
+        _tokenizer_cache.tokenizer = cached
+        _tokenizer_cache.path = path
+    return cached
 
 
 @lru_cache(maxsize=1)

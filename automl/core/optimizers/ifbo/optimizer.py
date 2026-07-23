@@ -177,7 +177,11 @@ class IfboOptimizer(Optimizer):
         check-then-set the first time they're touched, so the very first
         parallel batch of trials doesn't race to populate that cache and
         redundantly repeat expensive work (parsing the full dataset,
-        downloading/loading a pretrained transformer).
+        downloading/loading a pretrained transformer). Note: this does
+        NOT cover sequence-dl's tokenizer - that cache is thread-local by
+        design (see `_load_tokenizer`'s docstring), so warming it here
+        would only populate this (main) thread's copy and not help any
+        worker thread; each worker loads its own on first use instead.
         """
         self.logger.info("[IfboOptimizer] Prewarming shared caches...")
         self.dataset.load_data()
@@ -186,10 +190,8 @@ class IfboOptimizer(Optimizer):
             from automl.core.approaches.sequence_dl import (
                 SequenceDLApproach,
                 _load_pretrained_word_embeddings,
-                _load_tokenizer,
             )
 
-            _load_tokenizer(SequenceDLApproach.TOKENIZER_PATH)
             _load_pretrained_word_embeddings(SequenceDLApproach.EMBEDDING_MODEL_NAME)
 
     # -------------------------
