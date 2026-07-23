@@ -178,6 +178,21 @@ class TransformerApproach(
             ).to(self._device)
         )
 
+        # The HPO config space samples max_seq_length independently of the
+        # chosen transformer_model_name, so it can exceed the model's
+        # positional embedding capacity (e.g. 1024 with a 512-limit model
+        # like distilbert/bert-base-uncased). Clamp to what the model can
+        # actually handle to avoid a shape-mismatch crash inside the model's
+        # embedding layer.
+        model_max_len = getattr(self.model.config, "max_position_embeddings", None)
+        if model_max_len is not None and self._max_seq_length > model_max_len:
+            logger.warning(
+                f"[{self.name}] Requested max_seq_length={self._max_seq_length} "
+                f"exceeds model '{model_name}' max_position_embeddings="
+                f"{model_max_len}. Clamping to {model_max_len}."
+            )
+            self._max_seq_length = model_max_len
+
         # Count total parameters
         total_params = sum(p.numel() for p in self.model.parameters())
         trainable_params = sum(
