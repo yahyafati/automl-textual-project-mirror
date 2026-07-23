@@ -77,7 +77,11 @@ def build_config_space(
 
     # --- linear-only hyperparameters ---
     alpha = Float("alpha", (1e-6, 1e-1), default=1e-4, log=True)
-    max_seq_length = Integer("max_seq_length", (64, 256), default=128)
+
+    # TODO: Check this out
+    #  If you want to enforce exact powers of 2 (which align best with CUDA memory management and PyTorch tensor cores),
+    #      you can also define it as a Categorical hyperparameter:
+    max_seq_length = Categorical("max_seq_length", [128, 256, 512, 1024], default=256)
 
     # --- transformer-only hyperparameters ---
     transformer_model_name = Categorical(

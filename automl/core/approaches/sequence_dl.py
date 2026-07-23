@@ -5,6 +5,7 @@ from typing import Union, Optional
 import pandas as pd
 import torch
 import torch.nn as nn
+from sklearn.preprocessing import LabelEncoder
 from torch.nn.utils.rnn import pack_padded_sequence
 from ConfigSpace import Configuration
 from torch.utils.data import DataLoader
@@ -197,6 +198,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         )
         self.vocab = None
         self.model = None
+        self.label_encoder = LabelEncoder()
         self.trainer: Optional[TorchTrainer] = None
         self.tokenizer: Optional[PreTrainedTokenizerBase] = None
         self._pad_id: int = 0
@@ -226,6 +228,9 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         train_labels = train.labels
         val_texts = val.texts
         val_labels = val.labels
+
+        train_labels = self.label_encoder.fit_transform(train_labels)
+        val_labels = self.label_encoder.transform(val_labels)
 
         # TODO: Add to configspace
         self.tokenizer = _load_tokenizer(self.TOKENIZER_PATH)
@@ -381,7 +386,9 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         y_pred = torch.cat(all_preds).numpy()
         y_true = torch.cat(all_labels).numpy()
 
+        y_pred_orig = self.label_encoder.inverse_transform(y_pred)
+
         return {
-            "y_pred": y_pred,
+            "y_pred": y_pred_orig,
             "y_true": y_true,
         }
