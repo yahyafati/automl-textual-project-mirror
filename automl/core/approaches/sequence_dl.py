@@ -1,9 +1,11 @@
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Union, Optional
 
 import pandas as pd
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pack_padded_sequence
 from ConfigSpace import Configuration
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase, AutoTokenizer
@@ -12,6 +14,44 @@ from automl.core.approaches.base_approach import Approach
 from automl.core.registry import register_approach
 from automl.core.trainers.torch_trainer import TorchTrainer
 from automl.core.types import DatasetSplit, TrainResult, PredictionResult
+
+
+@lru_cache(maxsize=1)
+def _load_tokenizer(path: str) -> PreTrainedTokenizerBase:
+    """Load (and cache) the tokenizer once per process.
+
+    `prepare()` is called once per hyperparameter-optimization trial (the
+    ifBO loop in optimizer.py can run hundreds of these), and previously
+    each call re-read the tokenizer from disk and allocated a brand new
+    vocab/merges table. The tokenizer is stateless w.r.t. encoding, so it's
+    safe to reuse the same instance across trials instead of paying for a
+    fresh copy every time.
+    """
+    return AutoTokenizer.from_pretrained(path)
+
+
+def _collate_sequences(batch, pad_value: int = 0):
+    """Pad a batch to the length of its longest sequence.
+
+    TextSequenceDataset now stores un-padded (truncated) token ids, so
+    padding happens here, per-batch, instead of once for the whole dataset
+    at a fixed `max_seq_length`. If most texts are much shorter than
+    `max_seq_length`, this avoids materializing (and later training over)
+    a large amount of pure padding.
+    """
+    if isinstance(batch[0], tuple):
+        sequences, labels = zip(*batch)
+        labels = torch.stack(labels)
+    else:
+        sequences, labels = batch, None
+
+    lengths = [seq.size(0) for seq in sequences]
+    max_len = max(max(lengths), 1)  # guard against an all-empty batch
+    padded = torch.full((len(sequences), max_len), pad_value, dtype=torch.long)
+    for i, seq in enumerate(sequences):
+        padded[i, : seq.size(0)] = seq
+
+    return (padded, labels) if labels is not None else padded
 
 
 class BiLSTMClassifier(nn.Module):
@@ -40,8 +80,20 @@ class BiLSTMClassifier(nn.Module):
         self.fc = nn.Linear(hidden_dim * directions, num_classes)
 
     def forward(self, input_ids):
+        # Derive real sequence lengths from padding and pack the batch
+        # before running the LSTM. Previously the LSTM ran (and stored
+        # activations for backprop) over every padded position too - with
+        # a large max_seq_length and mostly-short texts, that's a lot of
+        # wasted compute and, more importantly, wasted autograd memory.
+        # Packing skips padded positions entirely in both directions.
+        lengths = (input_ids != self.embedding.padding_idx).sum(dim=1).clamp(min=1)
+
         emb = self.embedding(input_ids)  # (B, L, E)
-        outputs, (h_n, c_n) = self.lstm(emb)  # h_n: (num_layers*D, B, H)
+        packed = pack_padded_sequence(
+            emb, lengths.cpu(), batch_first=True, enforce_sorted=False
+        )
+        _, (h_n, c_n) = self.lstm(packed)  # h_n: (num_layers*D, B, H)
+
         # Use last layer’s hidden state, concatenate both directions
         if self.lstm.bidirectional:
             last_fwd = h_n[-2, :, :]  # (B, H)
@@ -65,36 +117,69 @@ class TextSequenceDataset(torch.utils.data.Dataset):
         tokenizer: PreTrainedTokenizerBase,
         max_seq_len: int,
     ):
-        self.labels = labels
-
-        # Tokenizer processes the entire list at once during startup
-        self.encoded_inputs = tokenizer(
+        # Tokenize once, but WITHOUT padding, and drop attention_mask /
+        # token_type_ids entirely - only input_ids is ever used downstream,
+        # so keeping the other two fields around wastes roughly 2/3 of the
+        # memory this dataset used to hold.
+        encoded = tokenizer(
             texts,
-            padding="max_length",
+            padding=False,
             truncation=True,
             max_length=max_seq_len,
-            return_tensors="pt",
+            return_attention_mask=False,
+            return_token_type_ids=False,
         )
+        input_ids_list = encoded["input_ids"]
+
+        # Store every sequence back-to-back in ONE contiguous int32 buffer
+        # (+ offsets) rather than as a Python list of per-sample tensors.
+        # Two separate wins:
+        #  1. int32 instead of int64 halves the raw storage size (vocab
+        #     sizes like distilbert's ~30k fit comfortably in int32; we
+        #     upcast to int64 lazily, per-sample, only when a batch is
+        #     actually read).
+        #  2. A single tensor (vs. a Python list/list-of-tensors) avoids
+        #     the classic PyTorch DataLoader multiprocessing pitfall where
+        #     touching many individual Python objects' refcounts in worker
+        #     processes forces the OS to copy-on-write pages that were
+        #     otherwise shared with the parent process, silently
+        #     multiplying memory usage by ~num_workers.
+        lengths = torch.tensor([len(ids) for ids in input_ids_list], dtype=torch.long)
+        self.offsets = torch.cat([torch.zeros(1, dtype=torch.long), lengths.cumsum(0)])
+        self.input_ids = (
+            torch.cat([torch.tensor(ids, dtype=torch.int32) for ids in input_ids_list])
+            if input_ids_list
+            else torch.empty(0, dtype=torch.int32)
+        )
+        self._len = len(input_ids_list)
+
+        if labels is not None:
+            # Precompute the label tensor once (mapping NaN -> mask value)
+            # instead of storing a raw Python list and re-checking
+            # `pd.isna` on every __getitem__ call. This also removes the
+            # same copy-on-write risk described above for the label list.
+            label_series = pd.Series(labels)
+            filled = label_series.fillna(self.DEFAULT_LABEL_MASK).astype("int64")
+            self.labels = torch.from_numpy(filled.to_numpy().copy())
+        else:
+            self.labels = None
 
     def __len__(self):
-        return (
-            len(self.labels)
-            if self.labels is not None
-            else len(self.encoded_inputs["input_ids"])
-        )
+        return self._len
 
     def __getitem__(self, idx):
-        x = self.encoded_inputs["input_ids"][idx]
+        start = int(self.offsets[idx])
+        end = int(self.offsets[idx + 1])
+        x = self.input_ids[start:end].to(torch.long)
         if self.labels is None:
             return x
-        label = self.labels[idx]
-        if not pd.isna(label):
-            return x, torch.tensor(label, dtype=torch.long)
-        return x, torch.tensor(self.DEFAULT_LABEL_MASK, dtype=torch.long)
+        return x, self.labels[idx]
 
 
 @register_approach("sequence-dl")
 class SequenceDLApproach(Approach[torch.nn.Module, dict]):
+
+    TOKENIZER_PATH = "./tokenizers/distilbert-base-uncased"
 
     def __init__(
         self,
@@ -114,6 +199,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         self.model = None
         self.trainer: Optional[TorchTrainer] = None
         self.tokenizer: Optional[PreTrainedTokenizerBase] = None
+        self._pad_id: int = 0
 
     def initialize(self):
         pass
@@ -142,13 +228,20 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         val_labels = val.labels
 
         # TODO: Add to configspace
-        self.tokenizer = AutoTokenizer.from_pretrained("./tokenizers/distilbert-base-uncased")  # type: ignore
+        self.tokenizer = _load_tokenizer(self.TOKENIZER_PATH)
         assert self.tokenizer is not None, "Tokenizer is None"
+        self._pad_id = (
+            self.tokenizer.pad_token_id
+            if self.tokenizer.pad_token_id is not None
+            else 0
+        )
 
         train_ds = TextSequenceDataset(
             train_texts, train_labels, self.tokenizer, max_seq_len
         )
         val_ds = TextSequenceDataset(val_texts, val_labels, self.tokenizer, max_seq_len)
+
+        collate_fn = partial(_collate_sequences, pad_value=self._pad_id)
 
         train_loader = DataLoader(
             train_ds,
@@ -157,6 +250,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             num_workers=self._num_worker,
             pin_memory=self._device.type == "cuda",
             persistent_workers=self._num_worker > 0,
+            collate_fn=collate_fn,
         )
         val_loader = DataLoader(
             val_ds,
@@ -165,6 +259,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             num_workers=self._num_worker,
             pin_memory=self._device.type == "cuda",
             persistent_workers=self._num_worker > 0,
+            collate_fn=collate_fn,
         )
 
         # Build model
@@ -258,6 +353,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
                 batch_size=batch_size,
                 shuffle=False,
                 pin_memory=self._device.type == "cuda",
+                collate_fn=partial(_collate_sequences, pad_value=self._pad_id),
             )
         else:
             loader = data
@@ -268,18 +364,22 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         for batch in loader:
             x, y = batch
             x = x.to(self._device, non_blocking=True)
-            y = y.to(self._device, non_blocking=True)
+            # `y` is only ever compared/concatenated on CPU later - it never
+            # needs to touch the GPU at all, so we no longer copy it there.
 
             logits = self.model(x)
             preds = torch.argmax(logits, dim=-1)
 
-            # Keep tensors on GPU
-            all_preds.append(preds)
+            # Move each batch's predictions to CPU immediately instead of
+            # letting a list of GPU-resident tensors grow for the entire
+            # pass. For large prediction sets this bounds peak GPU memory
+            # to ~one batch instead of the whole dataset.
+            all_preds.append(preds.cpu())
             all_labels.append(y)
 
-        # One GPU -> CPU transfer at the end
-        y_pred = torch.cat(all_preds).cpu().numpy()
-        y_true = torch.cat(all_labels).cpu().numpy()
+        # One GPU -> CPU transfer per batch, already done above.
+        y_pred = torch.cat(all_preds).numpy()
+        y_true = torch.cat(all_labels).numpy()
 
         return {
             "y_pred": y_pred,

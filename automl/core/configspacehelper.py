@@ -65,7 +65,7 @@ def build_config_space(
     # --- NN ---
     hidden_dim = Integer("hidden_dim", (32, 512), default=128, log=True)
     dropout = Float("dropout", (0.0, 0.5), default=0.1)
-    learning_rate = Float("learning_rate", (1e-4, 1e-1), default=1e-3, log=True)
+    learning_rate = Float("learning_rate", (1e-5, 1e-3), default=1e-3, log=True)
     optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adam")
     scheduler = Categorical(
         "scheduler",
