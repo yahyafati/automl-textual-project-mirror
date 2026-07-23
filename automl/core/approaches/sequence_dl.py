@@ -55,6 +55,9 @@ class BiLSTMClassifier(nn.Module):
 
 
 class TextSequenceDataset(torch.utils.data.Dataset):
+
+    DEFAULT_LABEL_MASK = -100
+
     def __init__(
         self,
         texts,
@@ -84,7 +87,10 @@ class TextSequenceDataset(torch.utils.data.Dataset):
         x = self.encoded_inputs["input_ids"][idx]
         if self.labels is None:
             return x
-        return x, torch.tensor(self.labels[idx], dtype=torch.long)
+        label = self.labels[idx]
+        if not pd.isna(label):
+            return x, torch.tensor(label, dtype=torch.long)
+        return x, torch.tensor(self.DEFAULT_LABEL_MASK, dtype=torch.long)
 
 
 @register_approach("sequence-dl")
@@ -189,6 +195,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         prepared_result,
         epochs: int = 10,
         load_path: Optional[Path] = None,
+        evaluate_validation=True,
         **kwargs,
     ) -> TrainResult:
         assert self.model is not None
@@ -215,6 +222,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
                 optimizer_args=optimizer_args,
                 scheduler=scheduler,
                 epochs=epochs,
+                evaluate_validation=evaluate_validation,
             )
             self.trainer = trainer
 
@@ -258,8 +266,9 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         all_labels = []
 
         for batch in loader:
-            x = batch[0].to(self._device, non_blocking=True)
-            y = batch[1].to(self._device, non_blocking=True)
+            x, y = batch
+            x = x.to(self._device, non_blocking=True)
+            y = y.to(self._device, non_blocking=True)
 
             logits = self.model(x)
             preds = torch.argmax(logits, dim=-1)

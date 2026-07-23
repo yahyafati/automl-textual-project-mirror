@@ -55,6 +55,7 @@ class TorchTrainer(Trainer):
         scheduler: _LRScheduler | str | None = None,
         scheduler_args: Optional[dict] = None,
         epochs: int = 5,
+        evaluate_validation: bool = True,
     ):
         super().__init__(approach_name)
         self.model = model
@@ -62,6 +63,7 @@ class TorchTrainer(Trainer):
         self.val_loader = val_loader
         self.device = device
         self.epochs = epochs
+        self.evaluate_validation = evaluate_validation
 
         self.optimizer = self.create_optimizer(self.model, optimizer, optimizer_args)
         self.scheduler = self.create_scheduler(
@@ -319,7 +321,7 @@ class TorchTrainer(Trainer):
                 logger.debug(f"Epoch {epoch + 1} complete. Train Loss: {avg_loss:.4f}")
 
                 val_acc = None
-                if self.val_loader is not None:
+                if self.evaluate_validation and self.val_loader is not None:
                     val_acc = self.evaluate()
                     logger.debug(
                         f"Epoch {epoch + 1} complete. Val Accuracy: {val_acc:.4f}"

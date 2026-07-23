@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Union, Optional
 
 import numpy as np
+import pandas as pd
 from ConfigSpace import Configuration, ConfigurationSpace
 from filelock import FileLock
 
@@ -457,6 +458,9 @@ class Optimizer(ABC):
             labels=test_df["label"].tolist(),
         )
 
+        # should_evaluate = not any(pd.isna(label) for label in test_split.labels)
+        should_evaluate = not pd.isna(test_split.labels[0])
+
         approach: Approach = get_approach(model_type)(
             incumbent,
             data_info["num_classes"],
@@ -466,7 +470,8 @@ class Optimizer(ABC):
 
         with approach.with_mode("eval") as _approach:
             prepared = _approach.prepare(train_split, test_split)
-            train_result = _approach.train(prepared, epochs=epochs)
+            # TODO: evaluate validation now only works in sequence-dl
+            train_result = _approach.train(prepared, epochs=epochs, evaluate_validation=should_evaluate)
             prediction_result = _approach.predict(test_df)
 
         self.logger.info(
