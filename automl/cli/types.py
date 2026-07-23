@@ -23,6 +23,7 @@ class RuntimeConfig(TypedDict):
     n_trials: int
 
     max_num_rows: int
+    val_size: float
 
     enable_jsonl_history: bool
     num_workers: int

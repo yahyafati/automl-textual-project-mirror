@@ -340,7 +340,7 @@ class Optimizer(ABC):
                 f"Approach: {model_type}"
             )
 
-            val_size = 0.2
+            val_size = self.runtime_config["val_size"]
             data_info = self.dataset.create_dataloaders(
                 val_size=val_size,
                 random_state=seed,

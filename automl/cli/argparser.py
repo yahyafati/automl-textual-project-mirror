@@ -23,6 +23,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     n_trials=10,
     enable_jsonl_history=True,
     max_num_rows=40_000,
+    val_size=0.2,
     optimizer="smac",
     num_workers=2,
     log_level="INFO",
@@ -63,23 +64,14 @@ def create_parser() -> argparse.ArgumentParser:
         ],
     )
 
-    parser.add_argument("--vocab-size", type=int)
-    parser.add_argument("--token-length", type=int)
-
     parser.add_argument("--evaluation-budget", type=int)
     parser.add_argument("--max-budget", type=int)
     parser.add_argument("--min-budget", type=int)
     parser.add_argument("--n-trials", type=int)
+    parser.add_argument("--max-num-rows", type=int)
+    parser.add_argument("--val-size", type=float)
 
-    parser.add_argument("--batch-size", type=int)
-    parser.add_argument("--lr", type=float)
-    parser.add_argument("--weight-decay", type=float)
-
-    parser.add_argument("--lstm-emb-dim", type=int)
-    parser.add_argument("--lstm-hidden-dim", type=int)
-    parser.add_argument("--ffnn-hidden-layer-dim", type=int)
-
-    parser.add_argument("--data-fraction", type=float)
+    # parser.add_argument("--data-fraction", type=float)
 
     parser.add_argument(
         "--enable-jsonl-history",
