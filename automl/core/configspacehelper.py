@@ -63,17 +63,17 @@ def build_config_space(
     sublinear_tf = Categorical("sublinear_tf", [True, False], default=True)
 
     # --- NN ---
-    hidden_dim = Integer("hidden_dim", (32, 512), default=128, log=True)
+    hidden_dim = Categorical("hidden_dim", [32, 64, 128, 256], default=128)
     dropout = Float("dropout", (0.0, 0.5), default=0.1)
-    learning_rate = Float("learning_rate", (1e-5, 1e-3), default=1e-3, log=True)
+    learning_rate = Float("learning_rate", (1e-4, 1e-2), default=1e-3, log=True)
     optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adam")
     scheduler = Categorical(
         "scheduler",
         ["steplr", "cosineannealinglr", "exponentiallr", "reducelronplateau"],
         default="steplr",
     )
-    weight_decay = Float("weight_decay", (1e-6, 1e-2), default=1e-5, log=True)
-    batch_size = Integer("batch_size", (32, 256), default=64, log=True)
+    weight_decay = Float("weight_decay", (1e-6, 1e-2), default=1e-4, log=True)
+    batch_size = Categorical("batch_size", [32, 64, 128, 256], default=64)
 
     # --- linear-only hyperparameters ---
     alpha = Float("alpha", (1e-6, 1e-1), default=1e-4, log=True)

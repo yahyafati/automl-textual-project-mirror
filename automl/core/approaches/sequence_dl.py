@@ -5,11 +5,10 @@ from typing import Union, Optional
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.preprocessing import LabelEncoder
 from torch.nn.utils.rnn import pack_padded_sequence
 from ConfigSpace import Configuration
 from torch.utils.data import DataLoader
-from transformers import PreTrainedTokenizerBase, AutoTokenizer
+from transformers import PreTrainedTokenizerBase, AutoTokenizer, AutoModel
 
 from automl.core.approaches.base_approach import Approach
 from automl.core.registry import register_approach
@@ -29,6 +28,54 @@ def _load_tokenizer(path: str) -> PreTrainedTokenizerBase:
     fresh copy every time.
     """
     return AutoTokenizer.from_pretrained(path)
+
+
+@lru_cache(maxsize=1)
+def _load_pretrained_word_embeddings(model_name: str) -> torch.Tensor:
+    """Load (and cache) just the pretrained token embedding matrix for
+    `model_name`, used to warm-start the BiLSTM's embedding layer instead
+    of starting from scratch.
+    """
+    model = AutoModel.from_pretrained(model_name)
+    weight = model.get_input_embeddings().weight.detach().clone()
+    del model
+    return weight
+
+
+@lru_cache(maxsize=16)
+def _pretrained_embedding_init(
+    model_name: str, vocab_size: int, target_dim: int
+) -> torch.Tensor:
+    """Build an (vocab_size, target_dim) init matrix from `model_name`'s
+    pretrained embeddings.
+
+    `target_dim` is the tuned `seq_embed_dim` hyperparameter (32-512) and
+    essentially never matches the transformer's native hidden size (768
+    for distilbert), so a straight copy isn't possible. Instead we PCA the
+    pretrained matrix down to `target_dim`: this keeps the directions of
+    highest variance in the pretrained embedding space, so tokens that are
+    semantically close before the projection stay close after it too -
+    still a much better starting point than random init, which is what
+    makes the LSTM re-learn token semantics from scratch every trial.
+    """
+    matrix = _load_pretrained_word_embeddings(model_name)
+
+    if matrix.size(0) >= vocab_size:
+        matrix = matrix[:vocab_size]
+    else:
+        pad = torch.empty(vocab_size - matrix.size(0), matrix.size(1))
+        nn.init.normal_(pad, mean=0.0, std=0.02)
+        matrix = torch.cat([matrix, pad], dim=0)
+
+    if target_dim >= matrix.size(1):
+        extra = torch.empty(matrix.size(0), target_dim - matrix.size(1))
+        nn.init.normal_(extra, mean=0.0, std=0.02)
+        return torch.cat([matrix, extra], dim=1)
+
+    mean = matrix.mean(dim=0, keepdim=True)
+    centered = matrix - mean
+    _, _, vt = torch.linalg.svd(centered, full_matrices=False)
+    return centered @ vt[:target_dim].T
 
 
 def _collate_sequences(batch, pad_value: int = 0):
@@ -65,9 +112,14 @@ class BiLSTMClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.5,
         bidirectional: bool = True,
+        pretrained_embeddings: Optional[torch.Tensor] = None,
     ):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        if pretrained_embeddings is not None:
+            with torch.no_grad():
+                self.embedding.weight.copy_(pretrained_embeddings)
+                self.embedding.weight[0].zero_()  # keep padding_idx row zero
         self.lstm = nn.LSTM(
             input_size=embed_dim,
             hidden_size=hidden_dim,
@@ -181,6 +233,7 @@ class TextSequenceDataset(torch.utils.data.Dataset):
 class SequenceDLApproach(Approach[torch.nn.Module, dict]):
 
     TOKENIZER_PATH = "./tokenizers/distilbert-base-uncased"
+    EMBEDDING_MODEL_NAME = "distilbert-base-uncased"
 
     def __init__(
         self,
@@ -269,6 +322,9 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
 
         # Build model
         vocab_size = self.tokenizer.vocab_size
+        pretrained_embeddings = _pretrained_embedding_init(
+            self.EMBEDDING_MODEL_NAME, vocab_size, embed_dim
+        )
         self.model = BiLSTMClassifier(
             vocab_size=vocab_size,
             embed_dim=embed_dim,
@@ -277,6 +333,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             num_layers=num_layers,
             dropout=dropout,
             bidirectional=True,
+            pretrained_embeddings=pretrained_embeddings,
         )
         assert self.model is not None
         self.model.to(self._device)

@@ -102,6 +102,14 @@ class TorchTrainer(Trainer):
             optimizer_args = optimizer_args or {}
             lr = optimizer_args.get("lr", 1e-3)
             weight_decay = optimizer_args.get("weight_decay", 1e-4)
+            momentum = optimizer_args.get("momentum", 0.9)
+            if opt_class == torch.optim.SGD:
+                return torch.optim.SGD(
+                    model.parameters(),
+                    lr=lr,
+                    weight_decay=weight_decay,
+                    momentum=momentum,
+                )
             return opt_class(model.parameters(), lr=lr, weight_decay=weight_decay)
 
         return optimizer
