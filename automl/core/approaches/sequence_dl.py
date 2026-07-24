@@ -337,6 +337,10 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             if num_workers is not None
             else self.get_param_value("num_workers")  # FIXME: Not a configuration param
         )
+        self._stochastic_epochs: bool = bool(kwargs.get("stochastic_epochs", False))
+        self._stochastic_epoch_fraction: Optional[float] = kwargs.get(
+            "stochastic_epoch_fraction", None
+        )
         self.vocab = None
         self.model = None
         # self.label_encoder = LabelEncoder()
@@ -486,6 +490,8 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
                 evaluate_validation=evaluate_validation,
                 max_grad_norm=max_grad_norm,
                 warmup_ratio=warmup_ratio,
+                stochastic_epochs=self._stochastic_epochs,
+                stochastic_epoch_fraction=self._stochastic_epoch_fraction,
             )
             self.trainer = trainer
 

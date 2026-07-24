@@ -29,6 +29,13 @@ class RuntimeConfig(TypedDict):
     num_workers: int
     optimizer: str
 
+    # If True, each training epoch samples a random fraction of the
+    # training batches (see `stochastic_epoch_fraction`) instead of
+    # iterating the full dataset - trades per-epoch dataset coverage for
+    # cheaper, more numerous epochs under a fixed epoch budget.
+    stochastic_epochs: bool
+    stochastic_epoch_fraction: float
+
     # Number of ifBO trials to run concurrently (one per device, or
     # round-robin across devices if this exceeds the number of visible
     # GPUs). Defaults to 1 = today's fully sequential behavior.

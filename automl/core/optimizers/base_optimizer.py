@@ -426,6 +426,10 @@ class Optimizer(ABC):
                 data_info["num_classes"],
                 device,
                 num_workers=num_workers,
+                stochastic_epochs=self.runtime_config["stochastic_epochs"],
+                stochastic_epoch_fraction=self.runtime_config[
+                    "stochastic_epoch_fraction"
+                ],
             )
 
             with approach.with_mode("train") as _approach:
@@ -568,6 +572,10 @@ class Optimizer(ABC):
             data_info["num_classes"],
             self.device,
             num_workers=self.runtime_config["num_workers"],
+            stochastic_epochs=self.runtime_config["stochastic_epochs"],
+            stochastic_epoch_fraction=self.runtime_config[
+                "stochastic_epoch_fraction"
+            ],
         )
 
         with approach.with_mode("eval") as _approach:

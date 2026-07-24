@@ -27,6 +27,8 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     optimizer="smac",
     num_workers=2,
     num_parallel_trials=1,
+    stochastic_epochs=False,
+    stochastic_epoch_fraction=0.25,
     log_level="INFO",
     use_random_selection=False,
     ifbo_greedy_candidate_selection=False,
@@ -86,6 +88,20 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--num-workers", type=int)
+    parser.add_argument(
+        "--stochastic-epochs",
+        action="store_true",
+        default=None,
+        help="Sample a random fraction of the training batches each epoch "
+        "instead of iterating the full dataset (see "
+        "--stochastic-epoch-fraction). Default: False (full epochs).",
+    )
+    parser.add_argument(
+        "--stochastic-epoch-fraction",
+        type=float,
+        help="Fraction of training batches to draw per epoch when "
+        "--stochastic-epochs is set, in (0, 1]. Default: 0.25.",
+    )
     parser.add_argument(
         "--num-parallel-trials",
         type=int,

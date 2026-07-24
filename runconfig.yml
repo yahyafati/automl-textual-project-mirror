@@ -21,3 +21,9 @@ max_trainers_in_memory: 2
 log_level: DEBUG
 use_random_selection: false
 ifbo_greedy_candidate_selection: true
+
+# Each epoch samples stochastic_epoch_fraction of the training batches
+# instead of iterating the full dataset - cheaper epochs at the cost of
+# per-epoch dataset coverage. Off by default.
+stochastic_epochs: false
+stochastic_epoch_fraction: 0.25

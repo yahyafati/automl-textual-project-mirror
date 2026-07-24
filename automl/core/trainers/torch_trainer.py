@@ -1,3 +1,4 @@
+import itertools
 from pathlib import Path
 from typing import Optional, TypedDict, Any, Union
 
@@ -58,6 +59,8 @@ class TorchTrainer(Trainer):
         evaluate_validation: bool = True,
         max_grad_norm: Optional[float] = None,
         warmup_ratio: float = 0.0,
+        stochastic_epochs: bool = False,
+        stochastic_epoch_fraction: Optional[float] = None,
     ):
         super().__init__(approach_name)
         self.model = model
@@ -67,6 +70,27 @@ class TorchTrainer(Trainer):
         self.epochs = epochs
         self.evaluate_validation = evaluate_validation
         self.max_grad_norm = max_grad_norm
+
+        # Stochastic epochs: each "epoch" trains on a random fraction of
+        # the training data instead of a full pass, so an epoch-budgeted
+        # fidelity (as used by ifBO's freeze-thaw scheduler) buys cheaper,
+        # more numerous gradient-update steps rather than being dominated
+        # by full-dataset passes. See `_run_epoch`.
+        self.stochastic_epochs = stochastic_epochs
+        if self.stochastic_epochs:
+            fraction = (
+                stochastic_epoch_fraction
+                if stochastic_epoch_fraction is not None
+                else 0.25
+            )
+            if not (0.0 < fraction <= 1.0):
+                raise ValueError(
+                    "stochastic_epoch_fraction must be in (0, 1], got "
+                    f"{fraction}"
+                )
+            self.stochastic_epoch_fraction = fraction
+        else:
+            self.stochastic_epoch_fraction = None
 
         self.optimizer = self.create_optimizer(self.model, optimizer, optimizer_args)
         # Snapshot the target LR per param group *before* warmup starts
@@ -231,10 +255,26 @@ class TorchTrainer(Trainer):
         total_loss = 0.0
         num_batches = len(self.train_loader)
 
-        for batch in self.train_loader:
-            total_loss += self._train_step(batch)
+        if self.stochastic_epochs and num_batches > 0:
+            # Take only the first `steps_per_epoch` batches of a *freshly
+            # shuffled* pass over train_loader (it reshuffles on every new
+            # iteration) instead of the whole dataset. That's a different
+            # random subsample each call, so a fixed epoch budget still
+            # covers the full dataset in expectation over several epochs,
+            # while each individual epoch is proportionally cheaper.
+            steps_per_epoch = max(
+                1, round(num_batches * self.stochastic_epoch_fraction)
+            )
+            batch_iter = itertools.islice(self.train_loader, steps_per_epoch)
+        else:
+            batch_iter = self.train_loader
 
-        return total_loss / num_batches if num_batches > 0 else 0.0
+        num_seen = 0
+        for batch in batch_iter:
+            total_loss += self._train_step(batch)
+            num_seen += 1
+
+        return total_loss / num_seen if num_seen > 0 else 0.0
 
     def load(self, path: Optional[Path]) -> None:
         if path is None:
