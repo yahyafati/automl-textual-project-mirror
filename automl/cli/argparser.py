@@ -16,7 +16,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     load_path=None,
     data_path=Path("data"),
     seed=int(datetime.datetime.now().timestamp() % 1e6),
-    approach="tfidf-ffnn",
+    approach="sequence-dl",
     evaluation_budget=5,
     max_budget=40,
     min_budget=5,
@@ -48,7 +48,7 @@ def create_parser() -> argparse.ArgumentParser:
         type=str,
         choices=["ag_news", "imdb", "amazon", "dbpedia", "yelp"],
     )
-    parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--device", type=str)
     parser.add_argument("--output-path", type=Path)
     parser.add_argument("--load-path", type=Path)
     parser.add_argument("--data-path", type=Path)
@@ -59,11 +59,8 @@ def create_parser() -> argparse.ArgumentParser:
         "--approach",
         type=str,
         choices=[
-            "tfidf-ffnn",
             "transformer",
-            "tfidf-linear",
             "sequence-dl",
-            "bpe-rnn",
         ],
     )
 
