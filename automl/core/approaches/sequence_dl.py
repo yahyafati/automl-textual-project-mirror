@@ -44,6 +44,78 @@ def _load_tokenizer(path: str) -> PreTrainedTokenizerBase:
     return cached
 
 
+# Full (untruncated) per-text encodings, cached by tokenizer path so they
+# survive across HPO trials. Keyed by tokenizer path -> {text: input_ids}.
+_full_encoding_cache: dict[str, dict[str, list[int]]] = {}
+_full_encoding_cache_lock = threading.Lock()
+
+
+def _encode_texts_cached(
+    texts: list[str],
+    tokenizer: PreTrainedTokenizerBase,
+    tokenizer_path: str,
+) -> list[list[int]]:
+    """Tokenize `texts` once, fully untruncated, caching each result by
+    (tokenizer_path, text) so a later call for the *same* text - just under
+    a different trial's `max_seq_length` - is answered from this in-memory
+    dict instead of re-running the tokenizer.
+
+    `prepare()` is called once per HPO trial (hundreds, per ifBO), and each
+    call previously re-tokenized the *entire* train+val corpus from scratch.
+    Every trial resamples train/val from the same fixed underlying pool of
+    texts (see `IfboOptimizer.train_single_configuration`, which reseeds
+    `train_test_split` per trial but draws from the same dataset), so after
+    the first trial nearly every text is already cached here and the cost
+    collapses to dict lookups. Truncation to the trial's `max_seq_length` is
+    applied afterwards, in `TextSequenceDataset`, by slicing these cached
+    full-length ids - so this cache is sized once by corpus size, not by
+    the number of trials or `max_seq_length` values seen.
+    """
+    cache = _full_encoding_cache.setdefault(tokenizer_path, {})
+
+    missing_texts = []
+    missing_positions = []
+    result: list[Optional[list[int]]] = [None] * len(texts)
+    for i, text in enumerate(texts):
+        cached_ids = cache.get(text)
+        if cached_ids is not None:
+            result[i] = cached_ids
+        else:
+            missing_texts.append(text)
+            missing_positions.append(i)
+
+    if missing_texts:
+        encoded = tokenizer(
+            missing_texts,
+            padding=False,
+            truncation=False,
+            return_attention_mask=False,
+            return_token_type_ids=False,
+        )["input_ids"]
+        with _full_encoding_cache_lock:
+            for pos, text, ids in zip(missing_positions, missing_texts, encoded):
+                ids = cache.setdefault(text, ids)
+                result[pos] = ids
+
+    return result  # type: ignore[return-value]
+
+
+def _truncate_ids(
+    ids: list[int], max_seq_len: int, sep_token_id: Optional[int]
+) -> list[int]:
+    """Reproduce `tokenizer(text, truncation=True, max_length=max_seq_len)`
+    from fully-encoded `ids` (`[CLS] + content + [SEP]`): if truncation is
+    needed, keep the first `max_seq_len - 1` tokens and re-append
+    `sep_token_id`, matching the tokenizer's own right-truncation-before-SEP
+    behavior, instead of just cutting off SEP with a plain slice.
+    """
+    if len(ids) <= max_seq_len:
+        return ids
+    if sep_token_id is None:
+        return ids[:max_seq_len]
+    return ids[: max_seq_len - 1] + [sep_token_id]
+
+
 @lru_cache(maxsize=1)
 def _load_pretrained_word_embeddings(model_name: str) -> torch.Tensor:
     """Load (and cache) just the pretrained token embedding matrix for
@@ -184,24 +256,21 @@ class TextSequenceDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        texts,
+        full_input_ids: list[list[int]],
         labels,
-        tokenizer: PreTrainedTokenizerBase,
         max_seq_len: int,
+        sep_token_id: Optional[int] = None,
     ):
-        # Tokenize once, but WITHOUT padding, and drop attention_mask /
-        # token_type_ids entirely - only input_ids is ever used downstream,
-        # so keeping the other two fields around wastes roughly 2/3 of the
-        # memory this dataset used to hold.
-        encoded = tokenizer(
-            texts,
-            padding=False,
-            truncation=True,
-            max_length=max_seq_len,
-            return_attention_mask=False,
-            return_token_type_ids=False,
-        )
-        input_ids_list = encoded["input_ids"]
+        # `full_input_ids` is already tokenized (see `_encode_texts_cached`),
+        # fully untruncated and WITHOUT attention_mask / token_type_ids -
+        # only input_ids is ever used downstream, so keeping the other two
+        # fields around wastes roughly 2/3 of the memory this dataset used
+        # to hold. Truncation to this trial's `max_seq_len` happens here,
+        # per-sample, so the same cached full encoding can be reused by
+        # every trial regardless of its sampled `max_seq_length`.
+        input_ids_list = [
+            _truncate_ids(ids, max_seq_len, sep_token_id) for ids in full_input_ids
+        ]
 
         # Store every sequence back-to-back in ONE contiguous int32 buffer
         # (+ offsets) rather than as a Python list of per-sample tensors.
@@ -274,6 +343,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         self.trainer: Optional[TorchTrainer] = None
         self.tokenizer: Optional[PreTrainedTokenizerBase] = None
         self._pad_id: int = 0
+        self._sep_token_id: Optional[int] = None
 
     def initialize(self):
         pass
@@ -312,11 +382,24 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             if self.tokenizer.pad_token_id is not None
             else 0
         )
+        self._sep_token_id = self.tokenizer.sep_token_id
+
+        # Encode once per unique text (cached across trials, see
+        # `_encode_texts_cached`); only truncation to this trial's
+        # `max_seq_len` happens below, in `TextSequenceDataset`.
+        train_full_ids = _encode_texts_cached(
+            train_texts, self.tokenizer, self.TOKENIZER_PATH
+        )
+        val_full_ids = _encode_texts_cached(
+            val_texts, self.tokenizer, self.TOKENIZER_PATH
+        )
 
         train_ds = TextSequenceDataset(
-            train_texts, train_labels, self.tokenizer, max_seq_len
+            train_full_ids, train_labels, max_seq_len, self._sep_token_id
         )
-        val_ds = TextSequenceDataset(val_texts, val_labels, self.tokenizer, max_seq_len)
+        val_ds = TextSequenceDataset(
+            val_full_ids, val_labels, max_seq_len, self._sep_token_id
+        )
 
         collate_fn = partial(_collate_sequences, pad_value=self._pad_id)
 
@@ -426,11 +509,14 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             texts = data["text"].tolist()
             labels = data["label"].tolist()
 
+            full_ids = _encode_texts_cached(
+                texts, self.tokenizer, self.TOKENIZER_PATH
+            )
             ds = TextSequenceDataset(
-                texts,
+                full_ids,
                 labels=labels,
-                tokenizer=self.tokenizer,
                 max_seq_len=max_seq_length,
+                sep_token_id=self._sep_token_id,
             )
 
             loader = DataLoader(

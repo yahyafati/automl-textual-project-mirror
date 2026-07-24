@@ -45,7 +45,11 @@ def build_config_space(
     # TODO: Check this out
     #  If you want to enforce exact powers of 2 (which align best with CUDA memory management and PyTorch tensor cores),
     #      you can also define it as a Categorical hyperparameter:
-    max_seq_length = Categorical("max_seq_length", [128, 256, 512, 1024], default=256)
+    # Capped at 256 (was up to 1024): packed-sequence LSTM cost scales
+    # ~linearly with token count, so trials sampling 1024 cost 4-8x a trial
+    # sampling 128 for little accuracy gain on star-rating classification,
+    # where most signal is in the first ~256 tokens of a review.
+    max_seq_length = Categorical("max_seq_length", [64, 128, 256], default=128)
 
     warmup_ratio = Float("warmup_ratio", (0.0, 0.2), default=0.1)
 
