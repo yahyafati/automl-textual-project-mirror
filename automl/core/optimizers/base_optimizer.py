@@ -175,9 +175,15 @@ class Optimizer(ABC):
                         if has_multiple_incumbents
                         else "predictions.npy"
                     )
+                    state_dict_filename = (
+                        f"model_state_dict_incumbent_{incumbent_idx}.pt"
+                        if has_multiple_incumbents
+                        else "model_state_dict.pt"
+                    )
                     evaluation_result = self.evaluate_incumbent(
                         incumbent_,
                         predictions_filename=predictions_filename,
+                        state_dict_filename=state_dict_filename,
                     )
                     result, prediction_result = (
                         evaluation_result["train_result"],
@@ -244,6 +250,31 @@ class Optimizer(ABC):
             f"[{self.__class__.__name__}] Saved test predictions to {predictions_path}"
         )
         return predictions_path
+
+    def _save_model_state_dict(
+        self,
+        approach: Approach,
+        filename: str = "model_state_dict.pt",
+    ) -> Optional[Path]:
+        """Persist the trained incumbent model's state dict."""
+        if approach.trainer is None:
+            self.logger.warning(
+                f"[{self.__class__.__name__}] No trainer available; skipping "
+                "model state dict save."
+            )
+            return None
+
+        state_dict_path = self.output_path / filename
+        self.output_path.mkdir(parents=True, exist_ok=True)
+        model_state_dict = {
+            k: v.cpu() for k, v in approach.trainer.model.state_dict().items()
+        }
+        torch.save(model_state_dict, state_dict_path)
+        self.logger.info(
+            f"[{self.__class__.__name__}] Saved incumbent model state dict to "
+            f"{state_dict_path}"
+        )
+        return state_dict_path
 
     @staticmethod
     def _majority_vote(labels: np.ndarray):
@@ -534,7 +565,10 @@ class Optimizer(ABC):
         return val_error
 
     def evaluate_incumbent(
-        self, incumbent: Configuration, predictions_filename: str = "predictions.npy"
+        self,
+        incumbent: Configuration,
+        predictions_filename: str = "predictions.npy",
+        state_dict_filename: str = "model_state_dict.pt",
     ) -> EvaluationResult:
         """Same evaluation protocol as SmacOptimizer."""
         epochs = self.runtime_config["evaluation_budget"]
@@ -597,6 +631,7 @@ class Optimizer(ABC):
             prediction_result["y_pred"],
             filename=predictions_filename,
         )
+        self._save_model_state_dict(approach, filename=state_dict_filename)
 
         return EvaluationResult(
             train_result=train_result, prediction_result=prediction_result
