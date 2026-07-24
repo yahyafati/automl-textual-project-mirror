@@ -83,6 +83,7 @@ class IfboOptimizer(Optimizer):
         self.incumbent_ensemble_top_k: int = runtime_config.get(
             "ifbo_incumbent_ensemble_top_k"
         )
+        self._thaw_step: int = runtime_config.get("ifbo_thaw_step", 1)
 
         if self.incumbent_ensemble_top_k < 1:
             raise ValueError(
@@ -332,7 +333,6 @@ class IfboOptimizer(Optimizer):
     def _step(
         self,
         cand: _IfBOCandidate,
-        step: int = 1,
         device: Optional[torch.device] = None,
         num_workers: Optional[int] = None,
     ) -> None:
@@ -346,7 +346,7 @@ class IfboOptimizer(Optimizer):
         so a parallel batch can run several `_step` calls concurrently,
         each pinned to its own device (see `_perform_ifbo`).
         """
-        cand.steps_done = min(cand.steps_done + step, self.b_max)
+        cand.steps_done = min(cand.steps_done + self._thaw_step, self.b_max)
         budget = self._step_to_budget(cand.steps_done)
 
         # Derive a seed for this evaluation (for reproducibility yet
@@ -378,7 +378,6 @@ class IfboOptimizer(Optimizer):
     def _step_on_device(
         self,
         cand: _IfBOCandidate,
-        step: int,
         device: torch.device,
         num_workers: int,
     ) -> None:
@@ -392,7 +391,7 @@ class IfboOptimizer(Optimizer):
         """
         if device.type == "cuda":
             torch.cuda.set_device(device)
-        self._step(cand, step, device=device, num_workers=num_workers)
+        self._step(cand, device=device, num_workers=num_workers)
 
     def _best_so_far_accuracy(self) -> float:
         ys: list[float] = []
@@ -407,7 +406,7 @@ class IfboOptimizer(Optimizer):
         context: list[Curve],
         completed_trials: int,
         exclude: Optional[set[int]] = None,
-    ) -> tuple[_IfBOCandidate, int]:
+    ) -> _IfBOCandidate:
         """
         Dynamic epsilon-greedy MFPI-random acquisition:
 
@@ -433,7 +432,7 @@ class IfboOptimizer(Optimizer):
             self.logger.debug("No Candidates, sampling a new one.")
             candidate = self._sample_new_candidate()
             self.candidates.append(candidate)
-            return candidate, 1
+            return candidate
 
         epsilon = self._epsilon(completed_trials)
         self.logger.debug(f"Selected epsilon: {epsilon}")
@@ -441,7 +440,7 @@ class IfboOptimizer(Optimizer):
             self.logger.debug("Exploration: Sampling a new candidate.")
             candidate = self._sample_new_candidate()
             self.candidates.append(candidate)
-            return candidate, 1
+            return candidate
 
         excluded_uids = exclude or set()
         pending: list[_IfBOCandidate] = [
@@ -453,16 +452,15 @@ class IfboOptimizer(Optimizer):
             self.logger.debug("No pending candidates, sampling a new one.")
             candidate = self._sample_new_candidate()
             self.candidates.append(candidate)
-            return candidate, 1
+            return candidate
 
         # For baselines
         if self.use_random_selection:
             candidate = self._rng.choice(pending)
-            return candidate, 1
+            return candidate
 
-        MAX_LOOKAHEAD = 3  # To prevent it from running to max budget
         f_best = self._best_so_far_accuracy()
-        h_rand = self._rng.randint(1, MAX_LOOKAHEAD)
+        h_rand = self._rng.randint(1, self.b_max)
         tau_rand = 10 ** self._rng.uniform(-4, -1)
         T_rand = f_best + tau_rand * (1.0 - f_best)
 
@@ -498,7 +496,7 @@ class IfboOptimizer(Optimizer):
         # Free inference-related variables right away
         del query, predictions, T_tensor
 
-        return selected, h_rand
+        return selected
 
     @staticmethod
     def _candidate_best_accuracy(c: _IfBOCandidate) -> float:
@@ -583,7 +581,7 @@ class IfboOptimizer(Optimizer):
 
         while used_steps < self.total_steps:
             context = self._build_context()
-            next_cand, steps = self._select_next_candidate(context, used_steps + 1)
+            next_cand = self._select_next_candidate(context, used_steps + 1)
 
             # Delete context early since we no longer need it for this step
             del context
@@ -598,9 +596,9 @@ class IfboOptimizer(Optimizer):
             self.logger.debug(
                 "[IfboOptimizer] Selected candidate: %s for steps: %d",
                 next_cand.config,
-                steps,
+                self._thaw_step,
             )
-            self._step(next_cand, steps)
+            self._step(next_cand)
             used_steps += 1
 
             # --- MEMORY CLEANUP: Clear resources tied up by the training step ---
@@ -673,7 +671,6 @@ class IfboOptimizer(Optimizer):
                     executor.submit(
                         self._step_on_device,
                         cand,
-                        steps,
                         self.devices[i % len(self.devices)],
                         self._effective_num_workers,
                     )

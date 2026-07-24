@@ -27,3 +27,5 @@ ifbo_greedy_candidate_selection: true
 # per-epoch dataset coverage. Off by default.
 stochastic_epochs: false
 stochastic_epoch_fraction: 0.25
+
+ifbo_thaw_step: 3

@@ -64,7 +64,7 @@ class TorchTrainer(Trainer):
         stochastic_epoch_fraction: Optional[float] = None,
     ):
         super().__init__(approach_name)
-        self.trainer_id = uuid.uuid4()
+        self.trainer_id = uuid.uuid4().hex[:8]
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader

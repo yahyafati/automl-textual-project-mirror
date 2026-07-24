@@ -34,6 +34,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     ifbo_greedy_candidate_selection=False,
     ifbo_incumbent_ensemble_top_k=5,
     ifbo_incumbent_ensemble_accuracy_threshold=0.05,
+    ifbo_thaw_step=1,
 )
 
 
@@ -122,6 +123,11 @@ def create_parser() -> argparse.ArgumentParser:
             "Absolute validation-accuracy tolerance for including an ifBO "
             "incumbent in the final ensemble."
         ),
+    )
+    parser.add_argument(
+        "--ifbo-thaw-step",
+        type=int,
+        help="Number of steps to thaw each candidate in ifBO.",
     )
 
     return parser
