@@ -5,20 +5,20 @@ data_path: data
 
 seed: 67
 
-evaluation_budget: 50
+evaluation_budget: 100
 max_budget: 30
 min_budget: 5
-n_trials: 50
+n_trials: 100
 optimizer: ifbo  # use rl_freeze_thaw for the PPO Freeze--Thaw scheduler
 
 approach: sequence-dl
 num_workers: 1 # TODO: I don't think this is being properly used
 num_parallel_trials: 2
 max_num_rows: 50000
-val_size: 0.2
+val_size: 0.1
 
 max_trainers_in_memory: 2
-log_level: DEBUG
+log_level: INFO
 use_random_selection: false
 ifbo_greedy_candidate_selection: true
 
