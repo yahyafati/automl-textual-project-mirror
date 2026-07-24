@@ -85,8 +85,7 @@ class TorchTrainer(Trainer):
             )
             if not (0.0 < fraction <= 1.0):
                 raise ValueError(
-                    "stochastic_epoch_fraction must be in (0, 1], got "
-                    f"{fraction}"
+                    "stochastic_epoch_fraction must be in (0, 1], got " f"{fraction}"
                 )
             self.stochastic_epoch_fraction = fraction
         else:
@@ -254,6 +253,9 @@ class TorchTrainer(Trainer):
 
         total_loss = 0.0
         num_batches = len(self.train_loader)
+        logger.debug(
+            f"Starting epoch {self._current_epoch + 1} with {num_batches} batches."
+        )
 
         if self.stochastic_epochs and num_batches > 0:
             # Take only the first `steps_per_epoch` batches of a *freshly
@@ -266,6 +268,7 @@ class TorchTrainer(Trainer):
                 1, round(num_batches * self.stochastic_epoch_fraction)
             )
             batch_iter = itertools.islice(self.train_loader, steps_per_epoch)
+            logger.debug(f"Using stochastic epoch with {steps_per_epoch} batches.")
         else:
             batch_iter = self.train_loader
 
@@ -273,6 +276,11 @@ class TorchTrainer(Trainer):
         for batch in batch_iter:
             total_loss += self._train_step(batch)
             num_seen += 1
+
+            if num_seen % 50 == 0:
+                logger.debug(
+                    f"Epoch {self._current_epoch + 1}, Batch {num_seen}: Loss = {total_loss / num_seen:.4f}"
+                )
 
         return total_loss / num_seen if num_seen > 0 else 0.0
 
