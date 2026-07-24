@@ -104,7 +104,7 @@ to *be* a Bayesian predictor for this family of curve priors, once, and never ag
 `"0.0.1"`) are loaded directly from the `ifbo` PyPI package:
 
 ```python
-self.model = FTPFN(version="0.0.1", target_path=".model")
+self.model = FTPFN(version="0.0.1", target_path="../.model")
 ```
 
 (`automl/core/optimizers/ifbo/optimizer.py:128`). `load-ftpfn.py` /
