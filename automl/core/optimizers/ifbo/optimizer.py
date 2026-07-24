@@ -643,13 +643,13 @@ class IfboOptimizer(Optimizer):
                 batch: list[tuple[_IfBOCandidate, int]] = []
                 selected_uids: set[int] = set()
                 for _ in range(round_size):
-                    cand, steps = self._select_next_candidate(
+                    cand = self._select_next_candidate(
                         context, used_steps + 1, exclude=selected_uids
                     )
                     if cand.steps_done >= self.b_max:
                         break
                     selected_uids.add(cand.uid)
-                    batch.append((cand, steps))
+                    batch.append((cand, self._thaw_step))
 
                 del context
 
