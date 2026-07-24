@@ -15,6 +15,9 @@ from automl.core.approaches.base_approach import Approach
 from automl.core.registry import register_approach
 from automl.core.trainers.torch_trainer import TorchTrainer
 from automl.core.types import DatasetSplit, TrainResult, PredictionResult
+from automl.logger import get_logger
+
+logger = get_logger()
 
 _tokenizer_cache = threading.local()
 
@@ -38,9 +41,18 @@ def _load_tokenizer(path: str) -> PreTrainedTokenizerBase:
     """
     cached = getattr(_tokenizer_cache, "tokenizer", None)
     if cached is None or getattr(_tokenizer_cache, "path", None) != path:
+        logger.info(
+            f"Loading tokenizer from '{path}' for thread "
+            f"{threading.get_ident()} (not yet cached on this thread)."
+        )
         cached = AutoTokenizer.from_pretrained(path)
         _tokenizer_cache.tokenizer = cached
         _tokenizer_cache.path = path
+    else:
+        logger.debug(
+            f"Reusing thread-local tokenizer for '{path}' "
+            f"(thread {threading.get_ident()})."
+        )
     return cached
 
 
@@ -85,6 +97,11 @@ def _encode_texts_cached(
             missing_positions.append(i)
 
     if missing_texts:
+        logger.debug(
+            f"Tokenization cache for '{tokenizer_path}': "
+            f"{len(texts) - len(missing_texts)}/{len(texts)} texts already "
+            f"cached, encoding {len(missing_texts)} new text(s)."
+        )
         encoded = tokenizer(
             missing_texts,
             padding=False,
@@ -96,6 +113,11 @@ def _encode_texts_cached(
             for pos, text, ids in zip(missing_positions, missing_texts, encoded):
                 ids = cache.setdefault(text, ids)
                 result[pos] = ids
+    else:
+        logger.debug(
+            f"Tokenization cache for '{tokenizer_path}': all {len(texts)} "
+            f"text(s) served from cache."
+        )
 
     return result  # type: ignore[return-value]
 
@@ -122,14 +144,20 @@ def _load_pretrained_word_embeddings(model_name: str) -> torch.Tensor:
     `model_name`, used to warm-start the BiLSTM's embedding layer instead
     of starting from scratch.
     """
+    logger.info(f"Loading pretrained embedding matrix from '{model_name}'.")
     model = AutoModel.from_pretrained(model_name)
     weight = model.get_input_embeddings().weight.detach().clone()
     del model
+    logger.debug(f"Pretrained embedding matrix for '{model_name}': shape={tuple(weight.shape)}.")
     return weight
 
 
 @lru_cache(maxsize=4)
 def _pretrained_svd(model_name: str, vocab_size: int):
+    logger.info(
+        f"Computing SVD of pretrained embeddings for '{model_name}' "
+        f"(vocab_size={vocab_size}); this runs once per (model_name, vocab_size)."
+    )
     matrix = _load_pretrained_word_embeddings(model_name)
     if matrix.size(0) >= vocab_size:
         matrix = matrix[:vocab_size]
@@ -140,6 +168,7 @@ def _pretrained_svd(model_name: str, vocab_size: int):
     mean = matrix.mean(dim=0, keepdim=True)
     centered = matrix - mean
     _, _, vt = torch.linalg.svd(centered, full_matrices=False)
+    logger.debug(f"SVD complete for '{model_name}' (vocab_size={vocab_size}).")
     return centered, vt  # computed once, ever, per (model_name, vocab_size)
 
 
@@ -159,8 +188,16 @@ def _pretrained_embedding_init(
     still a much better starting point than random init, which is what
     makes the LSTM re-learn token semantics from scratch every trial.
     """
+    logger.debug(
+        f"Building pretrained embedding init for '{model_name}' "
+        f"(vocab_size={vocab_size}, target_dim={target_dim})."
+    )
     centered, vt = _pretrained_svd(model_name, vocab_size)
     if target_dim >= centered.size(1):
+        logger.debug(
+            f"target_dim={target_dim} >= native dim={centered.size(1)}; "
+            f"padding with {target_dim - centered.size(1)} randomly-initialized dim(s)."
+        )
         extra = torch.empty(centered.size(0), target_dim - centered.size(1))
         nn.init.normal_(extra, mean=0.0, std=0.02)
         return torch.cat(
@@ -305,6 +342,11 @@ class TextSequenceDataset(torch.utils.data.Dataset):
         else:
             self.labels = None
 
+        logger.debug(
+            f"Built TextSequenceDataset: {self._len} sample(s), "
+            f"max_seq_len={max_seq_len}, total tokens={self.input_ids.numel()}."
+        )
+
     def __len__(self):
         return self._len
 
@@ -367,6 +409,13 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         dropout = float(self.get_param_value("dropout"))
         batch_size = int(self.get_param_value("batch_size"))
 
+        logger.debug(
+            f"[{self.name}] prepare(): max_seq_len={max_seq_len}, "
+            f"embed_dim={embed_dim}, hidden_dim={hidden_dim}, "
+            f"num_layers={num_layers}, dropout={dropout}, "
+            f"batch_size={batch_size}, num_workers={self._num_worker}."
+        )
+
         # Build vocab on train text
         train_texts = train.texts  # adjust column name as needed
 
@@ -374,6 +423,11 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         train_labels = train.labels
         val_texts = val.texts
         val_labels = val.labels
+
+        logger.debug(
+            f"[{self.name}] prepare(): {len(train_texts)} train text(s), "
+            f"{len(val_texts)} val text(s)."
+        )
 
         # train_labels = self.label_encoder.fit_transform(train_labels)
         # val_labels = self.label_encoder.transform(val_labels)
@@ -444,6 +498,13 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         assert self.model is not None
         self.model.to(self._device)
 
+        num_params = sum(p.numel() for p in self.model.parameters())
+        logger.debug(
+            f"[{self.name}] Built BiLSTMClassifier: vocab_size={vocab_size}, "
+            f"num_classes={self._num_classes}, num_params={num_params}, "
+            f"device={self._device.type}."
+        )
+
         # Trainer
         # epochs = self.get_param_value("epochs")
 
@@ -476,7 +537,16 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         # remove value which are None
         # scheduler_args = {k: v for k, v in scheduler_args.items() if v is not None}
 
+        logger.debug(
+            f"[{self.name}] train(): optimizer={optimizer_name}, lr={lr}, "
+            f"weight_decay={weight_decay}, scheduler={scheduler}, "
+            f"warmup_ratio={warmup_ratio}, max_grad_norm={max_grad_norm}, "
+            f"epochs={epochs}, evaluate_validation={evaluate_validation}, "
+            f"load_path={load_path}."
+        )
+
         if self.trainer is None:
+            logger.debug(f"[{self.name}] No existing trainer; creating a new TorchTrainer.")
             trainer = TorchTrainer(
                 model=self.model,
                 approach_name=self.name,
@@ -494,12 +564,15 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
                 stochastic_epoch_fraction=self._stochastic_epoch_fraction,
             )
             self.trainer = trainer
+        else:
+            logger.debug(f"[{self.name}] Reusing existing trainer for continued training.")
 
         assert self.trainer is not None
         result = self.trainer.train(
             load_path=load_path,
             save_path=None,  # or some path if you want val-best checkpoint
         )
+        logger.info(f"[{self.name}] train() finished after {epochs} epoch(s).")
         return result
 
     @torch.no_grad()
@@ -512,6 +585,11 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         self.model.eval()
 
         if isinstance(data, pd.DataFrame):
+            logger.debug(
+                f"[{self.name}] predict(): building DataLoader from a "
+                f"{len(data)}-row DataFrame (max_seq_length={max_seq_length}, "
+                f"batch_size={batch_size})."
+            )
             texts = data["text"].tolist()
             labels = data["label"].tolist()
 
@@ -533,6 +611,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
                 collate_fn=partial(_collate_sequences, pad_value=self._pad_id),
             )
         else:
+            logger.debug(f"[{self.name}] predict(): using caller-provided DataLoader.")
             loader = data
 
         all_preds = []
@@ -559,6 +638,8 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         y_true = torch.cat(all_labels).numpy()
 
         # y_pred_orig = self.label_encoder.inverse_transform(y_pred)
+
+        logger.debug(f"[{self.name}] predict(): produced {len(y_pred)} prediction(s).")
 
         return {
             "y_pred": y_pred,
