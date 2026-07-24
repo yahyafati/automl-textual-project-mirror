@@ -1,4 +1,5 @@
 import itertools
+import uuid
 from pathlib import Path
 from typing import Optional, TypedDict, Any, Union
 
@@ -63,6 +64,7 @@ class TorchTrainer(Trainer):
         stochastic_epoch_fraction: Optional[float] = None,
     ):
         super().__init__(approach_name)
+        self.trainer_id = uuid.uuid4()
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -349,6 +351,7 @@ class TorchTrainer(Trainer):
             "best_val_acc": self.best_val_acc,
             "approach_name": self.approach_name,
             "history": self._history,
+            "trainer_id": self.trainer_id,
         }
 
         if self.scheduler is not None:
@@ -381,7 +384,9 @@ class TorchTrainer(Trainer):
 
         try:
             for epoch in range(self.start_epoch, self.epochs):
-                logger.debug(f"--- Epoch {epoch + 1}/{self.epochs} ---")
+                logger.debug(
+                    f"--- [{self.trainer_id}] Epoch {epoch + 1}/{self.epochs} ---"
+                )
                 self._current_epoch = epoch
 
                 in_warmup = epoch < self.warmup_epochs
@@ -394,18 +399,20 @@ class TorchTrainer(Trainer):
 
                 avg_loss = self._run_epoch()
 
-                logger.debug(f"Epoch {epoch + 1} complete. Train Loss: {avg_loss:.4f}")
+                logger.debug(
+                    f"[{self.trainer_id}]: Epoch {epoch + 1} complete. Train Loss: {avg_loss:.4f}"
+                )
 
                 val_acc = None
                 if self.evaluate_validation and self.val_loader is not None:
                     val_acc = self.evaluate()
                     logger.debug(
-                        f"Epoch {epoch + 1} complete. Val Accuracy: {val_acc:.4f}"
+                        f"[{self.trainer_id}]: Epoch {epoch + 1} complete. Val Accuracy: {val_acc:.4f}"
                     )
 
                     if val_acc > self.best_val_acc:
                         logger.debug(
-                            f" New best validation accuracy achieved: {val_acc:.4f} (was {self.best_val_acc:.4f})"
+                            f"[{self.trainer_id}]: New best validation accuracy achieved: {val_acc:.4f} (was {self.best_val_acc:.4f})"
                         )
                         self.best_val_acc = val_acc
                         if save_path:
@@ -429,11 +436,11 @@ class TorchTrainer(Trainer):
                         self.scheduler.step()
 
             logger.info(
-                f"Training completed. Best Validation Accuracy: {self.best_val_acc:.4f}"
+                f"[{self.trainer_id}]: Training completed. Best Validation Accuracy: {self.best_val_acc:.4f}"
             )
         except KeyboardInterrupt as err:
             logger.warning(
-                f"Training interrupted. Best Validation Accuracy: {self.best_val_acc:.4f}"
+                f"[{self.trainer_id}]: Training interrupted. Best Validation Accuracy: {self.best_val_acc:.4f}"
             )
             raise
         finally:
