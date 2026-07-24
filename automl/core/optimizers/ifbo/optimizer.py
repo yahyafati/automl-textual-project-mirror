@@ -6,7 +6,7 @@ In-Context Freeze-Thaw Bayesian Optimization (ifBO) optimizer.
   to "thaw" next and at which (future) horizon, following MFPI-random.
 - Each step corresponds to one call to `train_single_configuration`.
 - Hyperparameters are encoded into [0,1]^d for FT-PFN using a simple
-  type-aware scheme (float/int/log/categorical), similar to ifbo_impl.py.
+  type-aware scheme (float/int/log/categorical).
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ class IfboOptimizer(Optimizer):
       to "thaw" next and at which (future) horizon, following MFPI-random.
     - Each step corresponds to one call to `train_single_configuration`.
     - Hyperparameters are encoded into [0,1]^d for FT-PFN using a simple
-      type-aware scheme (float/int/log/categorical), similar to ifbo_impl.py.
+      type-aware scheme (float/int/log/categorical).
     """
 
     def __init__(self, runtime_config: RuntimeConfig):

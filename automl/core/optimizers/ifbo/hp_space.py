@@ -1,5 +1,5 @@
 """
-Small hyperparameter-space abstraction (adapted from ifbo_impl.py).
+Small hyperparameter-space abstraction.
 
 Encodes ConfigSpace-style hyperparameters into a normalized [0, 1] scalar
 (and a full configuration into a [0, 1]^d vector) so it can be consumed by

@@ -129,7 +129,7 @@ Three `HPSpec` subclasses cover every hyperparameter type present in `build_conf
   ```
 
   where φ = log if `log=True` else the identity. Decoding is the exact inverse. This is
-  the standard PFN-style normalization also used in the original `ifbo_impl.py`
+  the standard PFN-style normalization.
   reference implementation the paper's authors distribute.
 - **`Categorical(choices)`**: maps each choice to the **center** of its equal-width bin,
   `encode(choice) = (index(choice) + 0.5) / len(choices)`, deliberately avoiding exact
