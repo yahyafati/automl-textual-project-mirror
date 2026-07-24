@@ -181,6 +181,7 @@ data
 
 # Whiteboard Test Predictions:
 !data/exam_dataset/
+!data/exam_dataset/predictions.npy
 /.automl-text-env
 /datasets
 
