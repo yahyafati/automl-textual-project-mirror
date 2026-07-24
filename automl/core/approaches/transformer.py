@@ -1,11 +1,10 @@
-from functools import lru_cache, partial
+from functools import partial
 from pathlib import Path
 from typing import Union, Optional
 
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.nn.utils.rnn import pack_padded_sequence
 from ConfigSpace import Configuration
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase, AutoModel
@@ -25,136 +24,66 @@ from automl.logger import get_logger
 logger = get_logger()
 
 
-@lru_cache(maxsize=1)
-def _load_pretrained_word_embeddings(model_name: str) -> torch.Tensor:
-    """Load (and cache) just the pretrained token embedding matrix for
-    `model_name`, used to warm-start the BiLSTM's embedding layer instead
-    of starting from scratch.
+class TransformerClassifier(nn.Module):
+    """A pretrained transformer encoder fine-tuned with a linear classification
+    head on top.
+
+    Where `BiLSTMClassifier` (sequence_dl.py) only ever borrows a pretrained
+    *embedding matrix* to warm-start training from scratch, this model keeps
+    (and fine-tunes) the transformer itself.
+
+    `forward` takes a single `input_ids` tensor - not an `(input_ids,
+    attention_mask)` pair - so it plugs directly into
+    `TorchTrainer._compute_loss`, which (like it already does for
+    `BiLSTMClassifier`) only ever calls `self.model(x)` with one tensor.
+    The attention mask is instead derived here from padding, the same way
+    `BiLSTMClassifier.forward` derives its sequence lengths from
+    `input_ids != padding_idx`.
     """
-    logger.info(f"Loading pretrained embedding matrix from '{model_name}'.")
-    model = AutoModel.from_pretrained(model_name)
-    weight = model.get_input_embeddings().weight.detach().clone()
-    del model
-    logger.debug(f"Pretrained embedding matrix for '{model_name}': shape={tuple(weight.shape)}.")
-    return weight
 
-
-@lru_cache(maxsize=4)
-def _pretrained_svd(model_name: str, vocab_size: int):
-    logger.info(
-        f"Computing SVD of pretrained embeddings for '{model_name}' "
-        f"(vocab_size={vocab_size}); this runs once per (model_name, vocab_size)."
-    )
-    matrix = _load_pretrained_word_embeddings(model_name)
-    if matrix.size(0) >= vocab_size:
-        matrix = matrix[:vocab_size]
-    else:
-        pad = torch.empty(vocab_size - matrix.size(0), matrix.size(1))
-        nn.init.normal_(pad, mean=0.0, std=0.02)
-        matrix = torch.cat([matrix, pad], dim=0)
-    mean = matrix.mean(dim=0, keepdim=True)
-    centered = matrix - mean
-    _, _, vt = torch.linalg.svd(centered, full_matrices=False)
-    logger.debug(f"SVD complete for '{model_name}' (vocab_size={vocab_size}).")
-    return centered, vt  # computed once, ever, per (model_name, vocab_size)
-
-
-@lru_cache(maxsize=16)
-def _pretrained_embedding_init(
-    model_name: str, vocab_size: int, target_dim: int
-) -> torch.Tensor:
-    """Build an (vocab_size, target_dim) init matrix from `model_name`'s
-    pretrained embeddings.
-
-    `target_dim` is the tuned `seq_embed_dim` hyperparameter (32-512) and
-    essentially never matches the transformer's native hidden size (768
-    for distilbert), so a straight copy isn't possible. Instead, we PCA the
-    pretrained matrix down to `target_dim`: this keeps the directions of
-    highest variance in the pretrained embedding space, so tokens that are
-    semantically close before the projection stay close after it too -
-    still a much better starting point than random init, which is what
-    makes the LSTM re-learn token semantics from scratch every trial.
-    """
-    logger.debug(
-        f"Building pretrained embedding init for '{model_name}' "
-        f"(vocab_size={vocab_size}, target_dim={target_dim})."
-    )
-    centered, vt = _pretrained_svd(model_name, vocab_size)
-    if target_dim >= centered.size(1):
-        logger.debug(
-            f"target_dim={target_dim} >= native dim={centered.size(1)}; "
-            f"padding with {target_dim - centered.size(1)} randomly-initialized dim(s)."
-        )
-        extra = torch.empty(centered.size(0), target_dim - centered.size(1))
-        nn.init.normal_(extra, mean=0.0, std=0.02)
-        return torch.cat(
-            [centered, extra], dim=1
-        )  # note: not mean-restored, matches original behavior
-    return centered @ vt[:target_dim].T
-
-
-class BiLSTMClassifier(nn.Module):
     def __init__(
         self,
-        vocab_size: int,
-        embed_dim: int,
-        hidden_dim: int,
+        model_name: str,
         num_classes: int,
-        num_layers: int = 1,
-        dropout: float = 0.5,
-        bidirectional: bool = True,
-        pretrained_embeddings: Optional[torch.Tensor] = None,
+        pad_token_id: int,
+        dropout: float = 0.1,
+        freeze_base: bool = False,
     ):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
-        if pretrained_embeddings is not None:
-            with torch.no_grad():
-                self.embedding.weight.copy_(pretrained_embeddings)
-                self.embedding.weight[0].zero_()  # keep padding_idx row zero
-        self.lstm = nn.LSTM(
-            input_size=embed_dim,
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            batch_first=True,
-            bidirectional=bidirectional,
-            dropout=dropout if num_layers > 1 else 0.0,
-        )
+        self.pad_token_id = pad_token_id
+        self.base = AutoModel.from_pretrained(model_name)
+        if freeze_base:
+            # Linear-probe mode: keep the pretrained representations fixed
+            # and only train the classification head on top of them.
+            for param in self.base.parameters():
+                param.requires_grad_(False)
         self.dropout = nn.Dropout(dropout)
-        directions = 2 if bidirectional else 1
-        self.fc = nn.Linear(hidden_dim * directions, num_classes)
+        self.classifier = nn.Linear(self.base.config.hidden_size, num_classes)
 
     def forward(self, input_ids):
-        # Derive real sequence lengths from padding and pack the batch
-        # before running the LSTM. Previously the LSTM ran (and stored
-        # activations for backprop) over every padded position too - with
-        # a large max_seq_length and mostly-short texts, that's a lot of
-        # wasted compute and, more importantly, wasted autograd memory.
-        # Packing skips padded positions entirely in both directions.
-        lengths = (input_ids != self.embedding.padding_idx).sum(dim=1).clamp(min=1)
-
-        emb = self.embedding(input_ids)  # (B, L, E)
-        packed = pack_padded_sequence(
-            emb, lengths.cpu(), batch_first=True, enforce_sorted=False
-        )
-        _, (h_n, c_n) = self.lstm(packed)  # h_n: (num_layers*D, B, H)
-
-        # Use last layer’s hidden state, concatenate both directions
-        if self.lstm.bidirectional:
-            last_fwd = h_n[-2, :, :]  # (B, H)
-            last_bwd = h_n[-1, :, :]  # (B, H)
-            h = torch.cat([last_fwd, last_bwd], dim=1)
-        else:
-            h = h_n[-1, :, :]
-        h = self.dropout(h)
-        logits = self.fc(h)  # (B, num_classes)
-        return logits
+        attention_mask = (input_ids != self.pad_token_id).long()
+        last_hidden_state = self.base(
+            input_ids=input_ids, attention_mask=attention_mask
+        ).last_hidden_state
+        # CLS-token pooling: the shared tokenizer prepends [CLS] to every
+        # sequence (see `text_encoding.truncate_ids`'s docstring), so
+        # position 0 always holds it, regardless of truncation.
+        cls_hidden = last_hidden_state[:, 0, :]
+        return self.classifier(self.dropout(cls_hidden))
 
 
-@register_approach("sequence-dl")
-class SequenceDLApproach(Approach[torch.nn.Module, dict]):
+@register_approach("transformer")
+class TransformerApproach(Approach[TransformerClassifier, dict]):
+    """Fine-tunes a pretrained transformer (e.g. DistilBERT/BERT) for text
+    classification, as an alternative to `SequenceDLApproach`'s
+    from-scratch BiLSTM.
+    """
 
-    TOKENIZER_PATH = "./tokenizers/distilbert-base-uncased"
-    EMBEDDING_MODEL_NAME = "distilbert-base-uncased"
+    TOKENIZERS_DIR = "./tokenizers"
+    DEFAULT_MODEL_NAME = "distilbert-base-uncased"
+    # Vendored locally under TOKENIZERS_DIR (see save_tokenizer.py); the
+    # `transformer_model_name` hyperparameter picks between these.
+    MODEL_NAME_CHOICES = ("distilbert-base-uncased", "bert-base-uncased")
 
     def __init__(
         self,
@@ -174,11 +103,10 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         self._stochastic_epoch_fraction: Optional[float] = kwargs.get(
             "stochastic_epoch_fraction", None
         )
-        self.vocab = None
-        self.model = None
-        # self.label_encoder = LabelEncoder()
+        self.model: Optional[TransformerClassifier] = None
         self.trainer: Optional[TorchTrainer] = None
         self.tokenizer: Optional[PreTrainedTokenizerBase] = None
+        self._model_name: str = self.DEFAULT_MODEL_NAME
         self._pad_id: int = 0
         self._sep_token_id: Optional[int] = None
 
@@ -191,26 +119,28 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
     def prepare_validation(self, val: DatasetSplit):
         return val
 
+    def _tokenizer_path(self, model_name: str) -> str:
+        return f"{self.TOKENIZERS_DIR}/{model_name}"
+
     def prepare(self, train: DatasetSplit, val: DatasetSplit):
         # Hyperparams from config / defaults
         max_seq_len = int(self.get_param_value("max_seq_length"))
-        embed_dim = int(self.get_param_value("seq_embed_dim"))
-        hidden_dim = int(self.get_param_value("hidden_dim"))
-        num_layers = int(self.get_param_value("seq_num_layers"))
-        dropout = float(self.get_param_value("dropout"))
+        model_name = self.get_param_value("transformer_model_name")
+        classifier_dropout = float(self.get_param_value("dropout"))
+        freeze_base = bool(self.get_param_value("freeze_base"))
         batch_size = int(self.get_param_value("batch_size"))
 
         logger.debug(
             f"[{self.name}] prepare(): max_seq_len={max_seq_len}, "
-            f"embed_dim={embed_dim}, hidden_dim={hidden_dim}, "
-            f"num_layers={num_layers}, dropout={dropout}, "
-            f"batch_size={batch_size}, num_workers={self._num_worker}."
+            f"model_name={model_name}, classifier_dropout={classifier_dropout}, "
+            f"freeze_base={freeze_base}, batch_size={batch_size}, "
+            f"num_workers={self._num_worker}."
         )
 
-        # Build vocab on train text
-        train_texts = train.texts  # adjust column name as needed
+        self._model_name = model_name
+        tokenizer_path = self._tokenizer_path(model_name)
 
-        # Build datasets
+        train_texts = train.texts
         train_labels = train.labels
         val_texts = val.texts
         val_labels = val.labels
@@ -220,11 +150,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             f"{len(val_texts)} val text(s)."
         )
 
-        # train_labels = self.label_encoder.fit_transform(train_labels)
-        # val_labels = self.label_encoder.transform(val_labels)
-
-        # TODO: Add to configspace
-        self.tokenizer = load_tokenizer(self.TOKENIZER_PATH)
+        self.tokenizer = load_tokenizer(tokenizer_path)
         assert self.tokenizer is not None, "Tokenizer is None"
         self._pad_id = (
             self.tokenizer.pad_token_id
@@ -237,11 +163,9 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         # `encode_texts_cached`); only truncation to this trial's
         # `max_seq_len` happens below, in `TextSequenceDataset`.
         train_full_ids = encode_texts_cached(
-            train_texts, self.tokenizer, self.TOKENIZER_PATH
+            train_texts, self.tokenizer, tokenizer_path
         )
-        val_full_ids = encode_texts_cached(
-            val_texts, self.tokenizer, self.TOKENIZER_PATH
-        )
+        val_full_ids = encode_texts_cached(val_texts, self.tokenizer, tokenizer_path)
 
         train_ds = TextSequenceDataset(
             train_full_ids, train_labels, max_seq_len, self._sep_token_id
@@ -271,38 +195,28 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             collate_fn=collate_fn,
         )
 
-        # Build model
-        vocab_size = self.tokenizer.vocab_size
-        pretrained_embeddings = _pretrained_embedding_init(
-            self.EMBEDDING_MODEL_NAME, vocab_size, embed_dim
-        )
-        self.model = BiLSTMClassifier(
-            vocab_size=vocab_size,
-            embed_dim=embed_dim,
-            hidden_dim=hidden_dim,
+        self.model = TransformerClassifier(
+            model_name=model_name,
             num_classes=self._num_classes,
-            num_layers=num_layers,
-            dropout=dropout,
-            bidirectional=True,
-            pretrained_embeddings=pretrained_embeddings,
+            pad_token_id=self._pad_id,
+            dropout=classifier_dropout,
+            freeze_base=freeze_base,
         )
-        assert self.model is not None
         self.model.to(self._device)
 
         num_params = sum(p.numel() for p in self.model.parameters())
-        logger.debug(
-            f"[{self.name}] Built BiLSTMClassifier: vocab_size={vocab_size}, "
-            f"num_classes={self._num_classes}, num_params={num_params}, "
-            f"device={self._device.type}."
+        num_trainable = sum(
+            p.numel() for p in self.model.parameters() if p.requires_grad
         )
-
-        # Trainer
-        # epochs = self.get_param_value("epochs")
+        logger.debug(
+            f"[{self.name}] Built TransformerClassifier from '{model_name}': "
+            f"num_classes={self._num_classes}, num_params={num_params}, "
+            f"num_trainable={num_trainable}, device={self._device.type}."
+        )
 
         return {
             "train_loader": train_loader,
             "val_loader": val_loader,
-            "vocab": self.vocab,
         }
 
     def train(
@@ -325,9 +239,6 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
 
         optimizer_args = {"lr": lr, "weight_decay": weight_decay}
 
-        # remove value which are None
-        # scheduler_args = {k: v for k, v in scheduler_args.items() if v is not None}
-
         logger.debug(
             f"[{self.name}] train(): optimizer={optimizer_name}, lr={lr}, "
             f"weight_decay={weight_decay}, scheduler={scheduler}, "
@@ -337,8 +248,10 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         )
 
         if self.trainer is None:
-            logger.debug(f"[{self.name}] No existing trainer; creating a new TorchTrainer.")
-            trainer = TorchTrainer(
+            logger.debug(
+                f"[{self.name}] No existing trainer; creating a new TorchTrainer."
+            )
+            self.trainer = TorchTrainer(
                 model=self.model,
                 approach_name=self.name,
                 train_loader=prepared_result["train_loader"],
@@ -354,14 +267,13 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
                 stochastic_epochs=self._stochastic_epochs,
                 stochastic_epoch_fraction=self._stochastic_epoch_fraction,
             )
-            self.trainer = trainer
         else:
             logger.debug(f"[{self.name}] Reusing existing trainer for continued training.")
 
         assert self.trainer is not None
         result = self.trainer.train(
             load_path=load_path,
-            save_path=None,  # or some path if you want val-best checkpoint
+            save_path=None,
         )
         logger.info(f"[{self.name}] train() finished after {epochs} epoch(s).")
         return result
@@ -384,9 +296,8 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             texts = data["text"].tolist()
             labels = data["label"].tolist()
 
-            full_ids = encode_texts_cached(
-                texts, self.tokenizer, self.TOKENIZER_PATH
-            )
+            tokenizer_path = self._tokenizer_path(self._model_name)
+            full_ids = encode_texts_cached(texts, self.tokenizer, tokenizer_path)
             ds = TextSequenceDataset(
                 full_ids,
                 labels=labels,
@@ -411,24 +322,15 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         for batch in loader:
             x, y = batch
             x = x.to(self._device, non_blocking=True)
-            # `y` is only ever compared/concatenated on CPU later - it never
-            # needs to touch the GPU at all, so we no longer copy it there.
 
             logits = self.model(x)
             preds = torch.argmax(logits, dim=-1)
 
-            # Move each batch's predictions to CPU immediately instead of
-            # letting a list of GPU-resident tensors grow for the entire
-            # pass. For large prediction sets this bounds peak GPU memory
-            # to ~one batch instead of the whole dataset.
             all_preds.append(preds.cpu())
             all_labels.append(y)
 
-        # One GPU -> CPU transfer per batch, already done above.
         y_pred = torch.cat(all_preds).numpy()
         y_true = torch.cat(all_labels).numpy()
-
-        # y_pred_orig = self.label_encoder.inverse_transform(y_pred)
 
         logger.debug(f"[{self.name}] predict(): produced {len(y_pred)} prediction(s).")
 

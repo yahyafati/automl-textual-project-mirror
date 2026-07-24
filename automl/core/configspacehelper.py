@@ -25,21 +25,19 @@ logger = get_logger()
 def build_config_space(
     seed: int = 42, fixed_model_type: str = "sequence-dl"
 ) -> ConfigurationSpace:
-    # TODO: Remove this
     cs = ConfigurationSpace(seed=seed)
 
-    model_type = Constant("model_type", "sequence-dl")
-    # --- NN ---
-    hidden_dim = Categorical("hidden_dim", [32, 64, 128, 256], default=128)
+    model_type = Constant("model_type", fixed_model_type)
+
+    # --- hyperparameters shared by every approach (consumed generically by
+    # TorchTrainer / Approach.get_param_value, regardless of architecture) ---
     dropout = Float("dropout", (0.0, 0.5), default=0.1)
-    learning_rate = Float("learning_rate", (1e-4, 1e-2), default=1e-3, log=True)
-    optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adam")
+    weight_decay = Float("weight_decay", (1e-6, 1e-2), default=1e-4, log=True)
     scheduler = Categorical(
         "scheduler",
         ["steplr", "cosineannealinglr", "exponentiallr", "reducelronplateau"],
         default="steplr",
     )
-    weight_decay = Float("weight_decay", (1e-6, 1e-2), default=1e-4, log=True)
     batch_size = Categorical("batch_size", [32, 64, 128, 256], default=64)
 
     # TODO: Check this out
@@ -53,26 +51,62 @@ def build_config_space(
 
     warmup_ratio = Float("warmup_ratio", (0.0, 0.2), default=0.1)
 
-    # --- sequence-dl (LSTM/GRU/CNN) hyperparameters ---
-    seq_embed_dim = Integer("seq_embed_dim", (32, 512), default=128, log=True)
-    seq_num_layers = Integer("seq_num_layers", (1, 3), default=1)
+    hyperparams: list[Hyperparameter] = [
+        model_type,
+        max_seq_length,  # sequence-dl and transformer
+        weight_decay,  # sequence-dl and transformer
+        batch_size,
+        warmup_ratio,
+        dropout,
+        scheduler,
+    ]
 
-    cs.add(
-        [
-            model_type,
-            max_seq_length,  # sequence-dl and transformer only
-            weight_decay,  # sequence-dl and transformer only
-            batch_size,
-            warmup_ratio,
-            seq_embed_dim,
-            seq_num_layers,
+    if fixed_model_type == "sequence-dl":
+        # --- sequence-dl (BiLSTM, trained from scratch) hyperparameters ---
+        hidden_dim = Categorical("hidden_dim", [32, 64, 128, 256], default=128)
+        learning_rate = Float("learning_rate", (1e-4, 1e-2), default=1e-3, log=True)
+        optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adam")
+        seq_embed_dim = Integer("seq_embed_dim", (32, 512), default=128, log=True)
+        seq_num_layers = Integer("seq_num_layers", (1, 3), default=1)
+
+        hyperparams += [
             hidden_dim,
-            dropout,
             learning_rate,
             optimizer,
-            scheduler,
+            seq_embed_dim,
+            seq_num_layers,
         ]
-    )
+
+    elif fixed_model_type == "transformer":
+        # --- transformer (fine-tuned pretrained encoder) hyperparameters ---
+        # Fine-tuning needs a much smaller LR than training the BiLSTM from
+        # scratch: sequence-dl's 1e-4 to 1e-2 range would wreck the
+        # pretrained weights within a handful of steps, so this uses the
+        # standard BERT-family fine-tuning range instead.
+        learning_rate = Float("learning_rate", (1e-5, 5e-5), default=2e-5, log=True)
+        optimizer = Categorical("optimizer", ["adamw", "adam"], default="adamw")
+        transformer_model_name = Categorical(
+            "transformer_model_name",
+            ["distilbert-base-uncased", "bert-base-uncased"],
+            default="distilbert-base-uncased",
+        )
+        # Linear-probe (True: only the classification head trains) vs. full
+        # fine-tuning (False, the usual "pretrained transformer" recipe).
+        freeze_base = Categorical("freeze_base", [False, True], default=False)
+
+        hyperparams += [
+            learning_rate,
+            optimizer,
+            transformer_model_name,
+            freeze_base,
+        ]
+
+    else:
+        raise ValueError(
+            f"Unknown fixed_model_type for config space: {fixed_model_type!r}"
+        )
+
+    cs.add(hyperparams)
 
     conditions: list[Condition] = []
 

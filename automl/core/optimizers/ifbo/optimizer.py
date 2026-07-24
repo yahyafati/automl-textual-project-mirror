@@ -178,9 +178,9 @@ class IfboOptimizer(Optimizer):
         parallel batch of trials doesn't race to populate that cache and
         redundantly repeat expensive work (parsing the full dataset,
         downloading/loading a pretrained transformer). Note: this does
-        NOT cover sequence-dl's tokenizer - that cache is thread-local by
-        design (see `_load_tokenizer`'s docstring), so warming it here
-        would only populate this (main) thread's copy and not help any
+        NOT cover either approach's tokenizer - that cache is thread-local by
+        design (see `text_encoding.load_tokenizer`'s docstring), so warming it
+        here would only populate this (main) thread's copy and not help any
         worker thread; each worker loads its own on first use instead.
         """
         self.logger.info("[IfboOptimizer] Prewarming shared caches...")
@@ -193,6 +193,19 @@ class IfboOptimizer(Optimizer):
             )
 
             _load_pretrained_word_embeddings(SequenceDLApproach.EMBEDDING_MODEL_NAME)
+
+        elif runtime_config["approach"] == "transformer":
+            from transformers import AutoModel
+
+            from automl.core.approaches.transformer import TransformerApproach
+
+            # `transformer_model_name` is HPO-tunable (see
+            # configspacehelper.build_config_space), so prewarm every choice
+            # it could sample rather than just one, to avoid the same
+            # download/load race for whichever choice the first parallel
+            # batch happens to draw.
+            for model_name in TransformerApproach.MODEL_NAME_CHOICES:
+                AutoModel.from_pretrained(model_name)
 
     # -------------------------
     # Public API

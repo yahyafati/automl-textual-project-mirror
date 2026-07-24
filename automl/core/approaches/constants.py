@@ -30,9 +30,25 @@ SEQUENCE_DL_DEFAULT_CONFIG = {
 }
 
 
+TRANSFORMER_DEFAULT_CONFIG = {
+    "transformer_model_name": "distilbert-base-uncased",
+    "max_seq_length": 128,
+    "dropout": 0.1,
+    "freeze_base": False,
+    "batch_size": 32,
+    "epochs": 5,
+    "optimizer": "adamw",
+    "learning_rate": 2e-5,
+    "weight_decay": 0.01,
+    "warmup_ratio": 0.1,
+    "max_grad_norm": 1.0,
+}
+
+
 DEFAULTS: dict[ApproachName | Literal["common"], dict[str, Any]] = {
     "common": COMMON_CONFIG,
     "sequence-dl": SEQUENCE_DL_DEFAULT_CONFIG,
+    "transformer": TRANSFORMER_DEFAULT_CONFIG,
 }
 
 
