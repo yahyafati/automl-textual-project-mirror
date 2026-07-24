@@ -500,7 +500,9 @@ def train_and_evaluate_config(
     return evaluation_result
 
 
-def _pick(cli_value: Any, manifest: Optional[dict[str, Any]], key: str, default: Any) -> Any:
+def _pick(
+    cli_value: Any, manifest: Optional[dict[str, Any]], key: str, default: Any
+) -> Any:
     if cli_value is not None:
         return cli_value
     if manifest is not None and key in manifest:
@@ -525,18 +527,25 @@ def main():
         )
 
     dataset_name: str = _pick(args.dataset, old_manifest, "dataset", None)
-    data_path = Path(_pick(args.data_path, old_manifest, "data_path", DEFAULT_DATA_PATH))
+    data_path = Path(
+        _pick(args.data_path, old_manifest, "data_path", DEFAULT_DATA_PATH)
+    )
     top_k: int = _pick(args.top_k, old_manifest, "top_k", DEFAULT_TOP_K)
     epochs: int = _pick(args.epochs, old_manifest, "epochs", DEFAULT_EPOCHS)
     seed: int = _pick(args.seed, old_manifest, "seed", DEFAULT_SEED)
-    num_workers: int = _pick(args.num_workers, old_manifest, "num_workers", DEFAULT_NUM_WORKERS)
+    num_workers: int = _pick(
+        args.num_workers, old_manifest, "num_workers", DEFAULT_NUM_WORKERS
+    )
     data_fraction: float = _pick(
         args.data_fraction, old_manifest, "data_fraction", DEFAULT_DATA_FRACTION
     )
     device_arg: str = _pick(args.device, old_manifest, "device", DEFAULT_DEVICE)
     device = resolve_device(device_arg)
     stochastic_epochs: bool = _pick(
-        args.stochastic_epochs, old_manifest, "stochastic_epochs", DEFAULT_STOCHASTIC_EPOCHS
+        args.stochastic_epochs,
+        old_manifest,
+        "stochastic_epochs",
+        DEFAULT_STOCHASTIC_EPOCHS,
     )
     stochastic_epoch_fraction: float = _pick(
         args.stochastic_epoch_fraction,
@@ -801,13 +810,13 @@ def main():
                 f"Final ensemble held-out accuracy: {ensemble_evaluation_result['val_accuracy']:.4f}"
             )
         else:
-            acc = saved_incumbents[0]["evaluation_result"]["train_result"]["val_accuracy"]
+            acc = saved_incumbents[0]["evaluation_result"]["train_result"][
+                "val_accuracy"
+            ]
             logger.info(f"Final held-out accuracy: {acc:.4f}")
 
     except KeyboardInterrupt:
-        completed = sum(
-            1 for r in incumbent_records if r.get("status") == "completed"
-        )
+        completed = sum(1 for r in incumbent_records if r.get("status") == "completed")
         logger.warning(
             f"Interrupted by user. {completed}/{len(top_trials)} incumbent(s) "
             f"finished and were saved under {output_dir}. Re-run with "

@@ -35,7 +35,9 @@ def _load_pretrained_word_embeddings(model_name: str) -> torch.Tensor:
     model = AutoModel.from_pretrained(model_name)
     weight = model.get_input_embeddings().weight.detach().clone()
     del model
-    logger.debug(f"Pretrained embedding matrix for '{model_name}': shape={tuple(weight.shape)}.")
+    logger.debug(
+        f"Pretrained embedding matrix for '{model_name}': shape={tuple(weight.shape)}."
+    )
     return weight
 
 
@@ -337,7 +339,9 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         )
 
         if self.trainer is None:
-            logger.debug(f"[{self.name}] No existing trainer; creating a new TorchTrainer.")
+            logger.debug(
+                f"[{self.name}] No existing trainer; creating a new TorchTrainer."
+            )
             trainer = TorchTrainer(
                 model=self.model,
                 approach_name=self.name,
@@ -356,7 +360,9 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             )
             self.trainer = trainer
         else:
-            logger.debug(f"[{self.name}] Reusing existing trainer for continued training.")
+            logger.debug(
+                f"[{self.name}] Reusing existing trainer for continued training."
+            )
 
         assert self.trainer is not None
         result = self.trainer.train(
@@ -384,9 +390,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             texts = data["text"].tolist()
             labels = data["label"].tolist()
 
-            full_ids = encode_texts_cached(
-                texts, self.tokenizer, self.TOKENIZER_PATH
-            )
+            full_ids = encode_texts_cached(texts, self.tokenizer, self.TOKENIZER_PATH)
             ds = TextSequenceDataset(
                 full_ids,
                 labels=labels,

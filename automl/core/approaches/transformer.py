@@ -268,7 +268,9 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
                 stochastic_epoch_fraction=self._stochastic_epoch_fraction,
             )
         else:
-            logger.debug(f"[{self.name}] Reusing existing trainer for continued training.")
+            logger.debug(
+                f"[{self.name}] Reusing existing trainer for continued training."
+            )
 
         assert self.trainer is not None
         result = self.trainer.train(

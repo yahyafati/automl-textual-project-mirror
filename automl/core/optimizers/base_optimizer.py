@@ -109,9 +109,7 @@ class Optimizer(ABC):
             return [torch.device(runtime_config["device"])]
 
         if torch.cuda.is_available():
-            return [
-                torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())
-            ]
+            return [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
 
         return [get_device()]
 
@@ -497,9 +495,7 @@ class Optimizer(ABC):
                         trainer_checkpoint_path = self._trainer_checkpoint_path(
                             config_id
                         )
-                        load_kwargs = self._trainer_load_kwargs(
-                            trainer_checkpoint_path
-                        )
+                        load_kwargs = self._trainer_load_kwargs(trainer_checkpoint_path)
                     result = _approach.train(
                         prepared_result,
                         epochs=int(budget),
@@ -607,9 +603,7 @@ class Optimizer(ABC):
             self.device,
             num_workers=self.runtime_config["num_workers"],
             stochastic_epochs=self.runtime_config["stochastic_epochs"],
-            stochastic_epoch_fraction=self.runtime_config[
-                "stochastic_epoch_fraction"
-            ],
+            stochastic_epoch_fraction=self.runtime_config["stochastic_epoch_fraction"],
         )
 
         with approach.with_mode("eval") as _approach:
@@ -618,9 +612,7 @@ class Optimizer(ABC):
             train_result = _approach.train(
                 prepared, epochs=epochs, evaluate_validation=should_evaluate
             )
-            self.logger.info(
-                "Predicting for test set"
-            )
+            self.logger.info("Predicting for test set")
             prediction_result = _approach.predict(test_df)
 
         self.logger.info(
