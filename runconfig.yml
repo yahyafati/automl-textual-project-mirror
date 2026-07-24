@@ -20,4 +20,4 @@ val_size: 0.2
 max_trainers_in_memory: 2
 log_level: DEBUG
 use_random_selection: false
-ifbo_greedy_candidate_selection: false
+ifbo_greedy_candidate_selection: true
