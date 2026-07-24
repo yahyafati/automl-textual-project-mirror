@@ -6,14 +6,7 @@ from typing import TypedDict, Literal, List, Optional, Any
 import numpy as np
 import pandas as pd
 
-ApproachName = Literal[
-    "tfidf-ffnn",
-    "transformer",
-    "tfidf-linear",
-    "sequence-dl",
-    "bpe-rnn",
-    # "tfidf-xgboost", # TODO: Something to check oot
-]
+ApproachName = Literal["sequence-dl",]
 
 
 @dataclass

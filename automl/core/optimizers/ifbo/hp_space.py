@@ -137,7 +137,7 @@ class HyperparameterSpace:
         # important hyperparameters first.
         all_names = list(specs.keys())
 
-        hyperparams_to_drop = ["model_type"]
+        hyperparams_to_drop = ["model_type", "warmup_ratio"]
         all_names = [name for name in all_names if name not in hyperparams_to_drop]
 
         if len(all_names) > MAX_HYPERPARAMETERS:
