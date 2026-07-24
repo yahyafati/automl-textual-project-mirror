@@ -42,6 +42,8 @@ DEFAULT_NUM_WORKERS = 2
 DEFAULT_DATA_FRACTION = 1.0
 DEFAULT_DEVICE = "auto"
 DEFAULT_DATA_PATH = Path("data")
+DEFAULT_STOCHASTIC_EPOCHS = False
+DEFAULT_STOCHASTIC_EPOCH_FRACTION = 0.25
 
 # Standard Unix convention: 128 + SIGINT(2).
 SIGINT_EXIT_CODE = 130
@@ -162,6 +164,23 @@ def parse_args() -> argparse.Namespace:
         "or the value recorded in manifest.json when resuming)",
     )
     parser.add_argument(
+        "--stochastic-epochs",
+        action="store_true",
+        default=None,
+        help="Sample a random fraction of the training batches each epoch "
+        "instead of iterating the full dataset, same as torch_trainer.py's "
+        "TorchTrainer (see --stochastic-epoch-fraction). Default: False, "
+        "or the value recorded in manifest.json when resuming.",
+    )
+    parser.add_argument(
+        "--stochastic-epoch-fraction",
+        type=float,
+        default=None,
+        help="Fraction of training batches to draw per epoch when "
+        "--stochastic-epochs is set, in (0, 1] (default: 0.25, or the "
+        "value recorded in manifest.json when resuming).",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("topk_results"),
@@ -175,6 +194,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--top-k must be >= 1")
     if args.data_fraction is not None and not 0.0 < args.data_fraction <= 1.0:
         parser.error("--data-fraction must be in (0, 1]")
+    if args.stochastic_epoch_fraction is not None and not (
+        0.0 < args.stochastic_epoch_fraction <= 1.0
+    ):
+        parser.error("--stochastic-epoch-fraction must be in (0, 1]")
 
     manifest = load_manifest(args.output_dir)
     if manifest is None:
@@ -194,7 +217,8 @@ def parse_args() -> argparse.Namespace:
         f"history={args.history}, dataset={args.dataset}, data_path={args.data_path}, "
         f"top_k={args.top_k}, epochs={args.epochs}, seed={args.seed}, "
         f"num_workers={args.num_workers}, device={args.device}, output_dir={args.output_dir}, "
-        f"data_fraction={args.data_fraction}"
+        f"data_fraction={args.data_fraction}, stochastic_epochs={args.stochastic_epochs}, "
+        f"stochastic_epoch_fraction={args.stochastic_epoch_fraction}"
     )
     return args
 
@@ -370,6 +394,8 @@ def train_and_evaluate_config(
     checkpoint_dir: Path,
     data_fraction: float = 1.0,
     resume_checkpoint: Optional[Path] = None,
+    stochastic_epochs: bool = DEFAULT_STOCHASTIC_EPOCHS,
+    stochastic_epoch_fraction: float = DEFAULT_STOCHASTIC_EPOCH_FRACTION,
 ) -> EvaluationResult:
     """
     Retrain a config on the (optionally subsampled) training set and
@@ -414,6 +440,8 @@ def train_and_evaluate_config(
         data_info["num_classes"],
         device,
         num_workers=num_workers,
+        stochastic_epochs=stochastic_epochs,
+        stochastic_epoch_fraction=stochastic_epoch_fraction,
     )
 
     load_kwargs: dict[str, Path] = {}
@@ -507,6 +535,15 @@ def main():
     )
     device_arg: str = _pick(args.device, old_manifest, "device", DEFAULT_DEVICE)
     device = resolve_device(device_arg)
+    stochastic_epochs: bool = _pick(
+        args.stochastic_epochs, old_manifest, "stochastic_epochs", DEFAULT_STOCHASTIC_EPOCHS
+    )
+    stochastic_epoch_fraction: float = _pick(
+        args.stochastic_epoch_fraction,
+        old_manifest,
+        "stochastic_epoch_fraction",
+        DEFAULT_STOCHASTIC_EPOCH_FRACTION,
+    )
 
     # --- select (or reuse) the top-k configs to train ---
     if resuming and args.history is None:
@@ -572,6 +609,8 @@ def main():
         "num_workers": num_workers,
         "data_fraction": data_fraction,
         "device": device_arg,
+        "stochastic_epochs": stochastic_epochs,
+        "stochastic_epoch_fraction": stochastic_epoch_fraction,
         "has_multiple_incumbents": has_multiple_incumbents,
         "incumbents": incumbent_records,
         "ensemble_completed": False,
@@ -676,6 +715,8 @@ def main():
                         if can_resume_training and trainer_checkpoint.exists()
                         else None
                     ),
+                    stochastic_epochs=stochastic_epochs,
+                    stochastic_epoch_fraction=stochastic_epoch_fraction,
                 )
 
                 labels = evaluation_result["prediction_result"]["y_true"]
