@@ -16,7 +16,6 @@ from automl.core.registry import register_approach
 from automl.core.trainers.torch_trainer import TorchTrainer
 from automl.core.types import DatasetSplit, TrainResult, PredictionResult
 
-
 _tokenizer_cache = threading.local()
 
 
@@ -57,6 +56,21 @@ def _load_pretrained_word_embeddings(model_name: str) -> torch.Tensor:
     return weight
 
 
+@lru_cache(maxsize=4)
+def _pretrained_svd(model_name: str, vocab_size: int):
+    matrix = _load_pretrained_word_embeddings(model_name)
+    if matrix.size(0) >= vocab_size:
+        matrix = matrix[:vocab_size]
+    else:
+        pad = torch.empty(vocab_size - matrix.size(0), matrix.size(1))
+        nn.init.normal_(pad, mean=0.0, std=0.02)
+        matrix = torch.cat([matrix, pad], dim=0)
+    mean = matrix.mean(dim=0, keepdim=True)
+    centered = matrix - mean
+    _, _, vt = torch.linalg.svd(centered, full_matrices=False)
+    return centered, vt  # computed once, ever, per (model_name, vocab_size)
+
+
 @lru_cache(maxsize=16)
 def _pretrained_embedding_init(
     model_name: str, vocab_size: int, target_dim: int
@@ -66,30 +80,20 @@ def _pretrained_embedding_init(
 
     `target_dim` is the tuned `seq_embed_dim` hyperparameter (32-512) and
     essentially never matches the transformer's native hidden size (768
-    for distilbert), so a straight copy isn't possible. Instead we PCA the
+    for distilbert), so a straight copy isn't possible. Instead, we PCA the
     pretrained matrix down to `target_dim`: this keeps the directions of
     highest variance in the pretrained embedding space, so tokens that are
     semantically close before the projection stay close after it too -
     still a much better starting point than random init, which is what
     makes the LSTM re-learn token semantics from scratch every trial.
     """
-    matrix = _load_pretrained_word_embeddings(model_name)
-
-    if matrix.size(0) >= vocab_size:
-        matrix = matrix[:vocab_size]
-    else:
-        pad = torch.empty(vocab_size - matrix.size(0), matrix.size(1))
-        nn.init.normal_(pad, mean=0.0, std=0.02)
-        matrix = torch.cat([matrix, pad], dim=0)
-
-    if target_dim >= matrix.size(1):
-        extra = torch.empty(matrix.size(0), target_dim - matrix.size(1))
+    centered, vt = _pretrained_svd(model_name, vocab_size)
+    if target_dim >= centered.size(1):
+        extra = torch.empty(centered.size(0), target_dim - centered.size(1))
         nn.init.normal_(extra, mean=0.0, std=0.02)
-        return torch.cat([matrix, extra], dim=1)
-
-    mean = matrix.mean(dim=0, keepdim=True)
-    centered = matrix - mean
-    _, _, vt = torch.linalg.svd(centered, full_matrices=False)
+        return torch.cat(
+            [centered, extra], dim=1
+        )  # note: not mean-restored, matches original behavior
     return centered @ vt[:target_dim].T
 
 
