@@ -11,20 +11,15 @@ COMMON_CONFIG: dict[str, Any] = {
 }
 
 SEQUENCE_DL_DEFAULT_CONFIG = {
-    "seq_arch": "bilstm",
-    "max_vocab_size": 20000,
     "max_seq_length": 128,
     "seq_embed_dim": 128,
     "hidden_dim": 128,
     "seq_num_layers": 1,
     "dropout": 0.5,
     "batch_size": 64,
-    "epochs": 5,
     "optimizer": "adamw",
-    "lr": 1e-3,
-    "weight_decay": 0.0,
-    "seq_num_filters": 1,
-    "seq_kernel_pattern": "3",
+    "learning_rate": 1e-3,
+    "weight_decay": 0.01,
     "warmup_ratio": 0.1,
     "max_grad_norm": 1.0,
 }
