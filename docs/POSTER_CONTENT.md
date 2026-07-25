@@ -50,48 +50,87 @@ template. Anything in `[brackets]` is a placeholder to fill in before printing.
 
 ---
 
-## Panel 2 — The AutoML Problem & System Design
+## Panel 2 — Our Approach & Model
 
-**Formal picture**: at each step, the optimizer chooses an action `a ∈ {start a new
-configuration θ, resume ("thaw") a partially-trained configuration}` and a **fidelity**
-(how many more training steps to spend), trying to maximize final validation performance
-under a total-step budget `B`. This is the freeze-thaw variant of multi-fidelity HPO —
-fidelity is continuous and *interruptible*, not fixed brackets chosen up front.
+### The approach: ifBO — how it decides what to train next
 
-Three cleanly separated, independently swappable layers — built this way specifically so
-four HPO strategies could be **fairly compared** against the same model/data code, rather
-than each optimizer bringing its own bespoke training loop. The **optimizer layer is the
-actual research contribution**; approach/trainer exist to give it something real to search
-over.
+At each step, ifBO picks an action `a ∈ {start a new configuration θ, resume ("thaw") a
+partially-trained one}`, trying to maximize validation performance under a total-step
+budget `B`. Concretely, every step:
+
+1. **Explore or exploit?** With a probability ε that decays over the run, sample a
+   brand-new configuration from the search space. Otherwise, exploit.
+2. **Exploit — ask the surrogate.** Every already-started, not-yet-maxed-out candidate is
+   scored by **FT-PFN**, a pretrained meta-learned surrogate: given each candidate's
+   partial learning curve so far (fed in as *in-context* tokens, no retraining), FT-PFN
+   estimates the probability it will beat a randomly-drawn target if thawed for a
+   randomly-drawn number of further steps (**MFPI-random** acquisition). The
+   highest-scoring candidate is selected.
+3. **Thaw = resume, not restart.** The chosen candidate's last checkpoint is loaded and
+   training continues for its next chunk of epochs; a fresh observation (time, accuracy)
+   is appended to its curve and fed back into FT-PFN's context for the next step.
+
+This is what "freeze-thaw" buys over fixed-bracket methods (Hyperband-style successive
+halving): any partially-trained configuration can be paused and resumed at any point,
+based on an online judgment call, instead of committing to pre-defined rounds.
+
+### The approach is model-agnostic
+
+ifBO never touches model internals. It talks to whatever it's optimizing through one
+narrow interface: a `ConfigSpace` configuration in, a validation error out, and a
+checkpoint keyed by a hash of the configuration for resuming. That boundary is enforced by
+a 3-layer architecture:
 
 ```
-CLI (RuntimeConfig: defaults → YAML → CLI flags)
-        │
+Optimizer   ★ ifBO — decides WHICH config to try next and for HOW LONG
+        │        only sees: Configuration → val_error, and a checkpoint hash
         ▼
-Optimizer   ★ the contribution — decides WHICH config to try next and for HOW LONG
-        │        implementations: RandomSearch · SMAC (Hyperband) · RL-Freeze-Thaw (PPO) · ifBO ★★
-        ▼
-Approach    ── turns a config into a concrete model + data pipeline (the testbed)
-        │        implementation: sequence-dl = BiLSTM over a DistilBERT WordPiece vocabulary
+Approach    ── turns a config into a concrete model + data pipeline
+        │        implementation used here: sequence-dl = BiLSTM (below)
         ▼
 Trainer     ── generic PyTorch train loop with checkpoint/resume — the mechanism
                  that makes "thaw" actually possible (resume ≠ restart)
 ```
 
-**Talking point**: "We didn't just pick one HPO method — we built the harness so we could
-swap optimizers and prove ifBO wins for a reason, not by accident of implementation."
+Swapping the BiLSTM for a different `Approach` (e.g. this repo's `transformer`
+fine-tuning approach) requires **zero changes to ifBO itself** — same acquisition logic,
+same checkpointing, same freeze-thaw loop. The testbed model below is one plug-in choice,
+not something ifBO is written around.
 
-### Testbed model (kept deliberately simple — the optimizer is where the complexity lives)
+### The model: BiLSTM over a DistilBERT WordPiece vocabulary
 
-- BiLSTM classifier over a DistilBERT WordPiece vocabulary (tokenizer only, not the
-  DistilBERT model), with an SVD-projected pretrained-embedding warm start. Chosen because
-  it's cheap enough to train **hundreds of times** per dataset — a necessary condition for
-  any multi-fidelity method to have enough trials to reason over. A heavier model
-  (transformer fine-tune) would have starved the optimizer of trials within budget and
-  turned this into a single-config training exercise instead of an HPO one.
-- `[N]` trials / `[N]` freeze-thaw steps executed for the reported `yelp` run — cite this
-  number on the poster as evidence the budget bought a genuinely multi-trial search, not a
-  handful of expensive runs.
+Kept deliberately simple — the optimizer is where the complexity lives. Token embeddings
+→ a packed bidirectional LSTM → concatenated final hidden states → linear classifier. The
+embedding layer gets a **warm start**: instead of random init, it's seeded from a
+DistilBERT's pretrained token embeddings, PCA/SVD-projected down to whatever embedding
+dimension the trial's hyperparameters call for — a much better starting point than
+learning token semantics from scratch every trial. Chosen because it's cheap enough to
+train **hundreds of times** per dataset, a necessary condition for any multi-fidelity
+method to have enough trials to reason over; a heavier model (transformer fine-tune) would
+have starved the optimizer of trials within budget.
+
+### Efficiency, on both sides of the harness
+
+**ifBO side:**
+- FT-PFN inference is a single forward pass over in-context tokens, no online refitting —
+  10–100× cheaper per acquisition than refitting-based surrogates (DPL/DyHPO-style).
+- Freeze-thaw checkpoint reuse: thawing a candidate resumes from its last checkpoint, so
+  no freeze-thaw step ever repeats training already paid for.
+- Batch-synchronous parallel dispatch (`num_parallel_trials`) round-robins candidates
+  across GPUs, sharing one FT-PFN context per round instead of per candidate.
+- Explicit memory cleanup (`gc.collect` + CUDA/MPS cache clearing) every step/round, since
+  FT-PFN inference otherwise accumulates activation memory across hundreds of steps.
+
+**BiLSTM/testbed side:**
+- Full-text tokenization is cached **once per text, process-wide** — hundreds of
+  freeze-thaw steps resample the same fixed text pool, so this turns
+  `O(steps × corpus)` cost into `O(corpus)`.
+- Packed sequences (`pack_padded_sequence`): the LSTM skips padded positions entirely in
+  both forward and backward passes instead of computing (and storing gradients for) them.
+- Pretrained-embedding SVD projection is computed once per `(model, vocab_size)` and
+  cached — every trial's warm start reuses it instead of recomputing from scratch.
+- Stratified subsampling bounds per-trial dataset cost independent of raw dataset size
+  (`dbpedia`/`yelp` are 500k+ rows).
 
 ---
 
