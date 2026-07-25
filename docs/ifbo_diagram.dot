@@ -5,82 +5,24 @@ digraph ifBO {
     label=<<b>ifBO — In-Context Freeze-Thaw Bayesian Optimization</b><br/><font point-size="11">automl/core/optimizers/ifbo/optimizer.py</font>>;
     fontsize=20;
     bgcolor="white";
-    newrank=true;
-    node [fontname="Helvetica", fontsize=12, style="filled,rounded", shape=box, penwidth=1.2];
-    edge [fontname="Helvetica", fontsize=10.5, color="#555555"];
+    node [fontname="Helvetica", fontsize=13, style="filled,rounded", shape=box, penwidth=1.3, margin="0.25,0.15"];
+    edge [fontname="Helvetica", fontsize=11, color="#555555", penwidth=1.1];
 
-    start [label="Init: candidate pool = ∅\nused_steps = 0", shape=oval, fillcolor="#E8EAF6", color="#3F51B5"];
-    budget_check [label="used_steps < total_steps ?", shape=diamond, fillcolor="#FFF9C4", color="#F9A825"];
-    epsilon_gate [label="ε-greedy gate  (added, §6)\nε(t) = ε_min + (ε₀−ε_min)·(1−t/T)^p\ndraw u ~ U(0,1)", fillcolor="#FCE4EC", color="#C2185B"];
+    space [label="Search space Λ\n(BiLSTM hyperparameters)", shape=oval, fillcolor="#E8EAF6", color="#3F51B5"];
+    pool [label="Candidate pool\npartial learning curves (freeze-thaw history H)", fillcolor="#E0F2F1", color="#00695C"];
+    surrogate [label="FT-PFN surrogate\npretrained, frozen — in-context prediction", fillcolor="#D1C4E9", color="#4527A0", shape=box3d];
+    acquisition [label="MFPI-random acquisition\nexplore a new config vs. exploit (thaw) an existing one", fillcolor="#F3E5F5", color="#7B1FA2"];
+    train [label="Train one more step\ncheckpointed BiLSTM training, new curve point recorded", fillcolor="#B2DFDB", color="#00695C"];
+    budget_check [label="budget exhausted?", shape=diamond, fillcolor="#FFF9C4", color="#F9A825"];
+    output [label="Incumbent ensemble → majority vote\n→ predictions.npy", fillcolor="#FFCCBC", color="#BF360C"];
 
-    explore [label="EXPLORE  (prob ε(t))\nsample new λ ~ Λ uniformly\nadd to pool, steps_done = 0", fillcolor="#E1F5FE", color="#0277BD"];
-
-    subgraph cluster_acquisition {
-        label="EXPLOIT  (prob 1 − ε(t))  —  MFPI-random acquisition";
-        style="rounded,filled";
-        fillcolor="#F3E5F5";
-        color="#7B1FA2";
-        fontsize=12.5;
-
-        build_context [label="Build context H\nfrom every candidate's (z, ts, ys)", fillcolor="#EDE7F6", color="#5E35B1"];
-        ftpfn [label="FT-PFN surrogate\n(pretrained transformer, frozen weights)\nin-context inference, no refitting", fillcolor="#D1C4E9", color="#4527A0", shape=box3d];
-        sample_ht [label="sample h_rand ~ U{1,2,3}\nsample τ_rand, T_rand = f_best + τ_rand·(1−f_best)", fillcolor="#EDE7F6", color="#5E35B1"];
-        pi_scores [label="query predictive posterior for every\npending candidate at t' = min(steps_done+h,b_max)/b_max\n→ PI scores = P(f > T_rand)", fillcolor="#EDE7F6", color="#5E35B1"];
-        select_mode [label="select candidate\nargmax(PI)  [paper-faithful, greedy]\nor softmax-sample(PI)  [added stochastic mode]", fillcolor="#EDE7F6", color="#5E35B1"];
-
-        { rank=same; ftpfn; sample_ht; }
-        build_context -> ftpfn;
-        ftpfn -> pi_scores;
-        sample_ht -> pi_scores;
-        pi_scores -> select_mode;
-    }
-
-    merge [label="selected candidate (λ, h steps)", shape=oval, fillcolor="#E8EAF6", color="#3F51B5"];
-
-    subgraph cluster_thaw {
-        label="Thaw / train one step  (base_optimizer.py)";
-        style="rounded,filled";
-        fillcolor="#E0F2F1";
-        color="#00695C";
-        fontsize=12.5;
-
-        checkpoint [label="checkpoint lookup\ncheckpoints/trainers/<hash(λ)>/trainer.pth", fillcolor="#B2DFDB", color="#00695C"];
-        train [label="resume + train BiLSTM (sequence-dl)\nfor h more epochs via TorchTrainer", fillcolor="#B2DFDB", color="#00695C"];
-        observe [label="observe y = 1 − val_error\nappend (t, y) to candidate curve\nsave checkpoint back", fillcolor="#B2DFDB", color="#00695C"];
-
-        checkpoint -> train -> observe;
-    }
-
-    increment [label="steps_done += h\nused_steps += h", fillcolor="#E8EAF6", color="#3F51B5"];
-
-    subgraph cluster_finalize {
-        label="Finalization  (§8, added ensemble extension)";
-        style="rounded,filled";
-        fillcolor="#FFF3E0";
-        color="#E65100";
-        fontsize=12.5;
-
-        rank [label="rank all candidates by best-ever accuracy", fillcolor="#FFE0B2", color="#E65100"];
-        topk [label="keep top-k within accuracy_threshold\nof the single best (default k=5, thr=0.01)", fillcolor="#FFE0B2", color="#E65100"];
-        retrain [label="fully retrain each surviving incumbent\non full training data (fresh, no checkpoint reuse)", fillcolor="#FFE0B2", color="#E65100"];
-        vote [label="majority-vote test predictions\n→ predictions.npy", fillcolor="#FFCCBC", color="#BF360C"];
-
-        rank -> topk -> retrain -> vote;
-    }
-
-    { rank=same; explore; build_context; }
-
-    start -> budget_check;
-    budget_check -> epsilon_gate [label="yes"];
-    budget_check -> rank [label="no (budget exhausted)"];
-
-    epsilon_gate -> explore [label="u < ε(t)"];
-    epsilon_gate -> build_context [label="u ≥ ε(t)"];
-
-    explore -> merge;
-    select_mode -> merge;
-
-    merge -> checkpoint;
-    observe -> increment;
-    increment -> budget_check [label="loop", constraint=false, style=dashed, color="#9E9E9E"];
+    space -> pool [label="  sample"];
+    pool -> surrogate [label="  context"];
+    surrogate -> acquisition [label="  predicted curves"];
+    acquisition -> train [label="  selected config"];
+    train -> pool [label="  new observation", constraint=false];
+    pool -> budget_check [style=invis];
+    train -> budget_check [label="  "];
+    budget_check -> acquisition [label="no, keep going", constraint=false, style=dashed, color="#9E9E9E"];
+    budget_check -> output [label="yes"];
 }
