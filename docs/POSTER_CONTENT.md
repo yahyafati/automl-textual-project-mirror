@@ -30,18 +30,16 @@ template. Anything in `[brackets]` is a placeholder to fill in before printing.
 
 ## Panel 1 — In a nutshell
 
-- **The AutoML question we address**: given a fixed compute budget and hundreds of candidate
-  hyperparameter configurations, how do you decide *which ones deserve more training and
-  which should be abandoned early* — without wasting budget training every candidate to
-  completion just to find out?
-- Our answer is **multi-fidelity, freeze-thaw Bayesian optimization**: train configurations
-  only *partially*, in parallel, and use a **pretrained meta-learned surrogate (FT-PFN)** to
-  forecast whether a partially-observed learning curve is worth continuing — spending the
-  rest of the budget only on the winners.
-- We didn't implement one HPO method and call it done: we built **four** optimizers spanning
-  the field's major paradigms — naive random search, classical BO+Hyperband (SMAC), a
-  from-scratch RL scheduler (PPO), and **ifBO** (in-context freeze-thaw BO) — on one shared
-  harness, so gains are attributable to *method*, not to different code paths.
+- **The AutoML question we address**: given a fixed compute budget and a hyperparameter
+  search space too large to explore exhaustively, how do you decide *which configurations
+  deserve more training and which should be abandoned early* — without wasting budget
+  training every candidate to completion just to find out?
+- Our answer is **multi-fidelity, freeze-thaw Bayesian optimization**: configurations are
+  trained only *partially*, in parallel, free to pause ("freeze") or resume ("thaw") at any
+  point. The candidate pool isn't fixed or handed in upfront — it **grows dynamically**:
+  with a decaying exploration probability, sample a brand-new configuration; otherwise
+  resume whichever already-started candidate a **pretrained meta-learned surrogate
+  (FT-PFN)** judges most likely to improve, based on its partial learning curve so far.
 - **Efficiency is a first-class design objective**, not an afterthought: every expensive
   step in the pipeline (tokenization, embedding init, per-trial training) is cached,
   checkpointed, or fidelity-capped specifically to fit more HPO trials inside the budget.
