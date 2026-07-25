@@ -9,12 +9,12 @@ evaluation_budget: 100
 max_budget: 30
 min_budget: 5
 n_trials: 100
-optimizer: ifbo  # use rl_freeze_thaw for the PPO Freeze--Thaw scheduler
+optimizer: ifbo
 
 approach: sequence-dl
 num_workers: 1 # TODO: I don't think this is being properly used
 num_parallel_trials: 2
-max_num_rows: 50000
+max_num_rows: 100000
 val_size: 0.1
 
 max_trainers_in_memory: 2
