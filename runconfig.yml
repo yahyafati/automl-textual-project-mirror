@@ -6,7 +6,7 @@ data_path: data
 seed: 67
 
 evaluation_budget: 100
-max_budget: 30
+max_budget: 50
 min_budget: 5
 n_trials: 100
 optimizer: ifbo

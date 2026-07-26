@@ -279,9 +279,9 @@ class TorchTrainer(Trainer):
             total_loss += self._train_step(batch)
             num_seen += 1
 
-            if num_seen % 50 == 0:
+            if num_seen % 100 == 0:
                 logger.debug(
-                    f"Epoch {self._current_epoch + 1}, Batch {num_seen}: Loss = {total_loss / num_seen:.4f}"
+                    f"[{self.trainer_id}] Epoch {self._current_epoch + 1}, Batch {num_seen}: Loss = {total_loss / num_seen:.4f}"
                 )
 
         return total_loss / num_seen if num_seen > 0 else 0.0
@@ -326,7 +326,7 @@ class TorchTrainer(Trainer):
             self.scheduler = None
 
         logger.debug(
-            f"Successfully resumed from checkpoint. Next epoch: {self.start_epoch + 1}"
+            f"[{self.trainer_id}] Successfully resumed from checkpoint. Next epoch: {self.start_epoch + 1}"
         )
 
     def save(self, path: Path, **kwargs) -> None:
