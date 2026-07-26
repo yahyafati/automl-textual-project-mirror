@@ -27,6 +27,7 @@ from automl.core.types import (
 )
 from automl.core.utils.misc import SavedIncumbent
 from automl.core.utils.misc import (
+    atomic_torch_save,
     get_device,
     numpy_and_config_encoder,
     set_seed,
@@ -267,7 +268,7 @@ class Optimizer(ABC):
         model_state_dict = {
             k: v.cpu() for k, v in approach.trainer.model.state_dict().items()
         }
-        torch.save(model_state_dict, state_dict_path)
+        atomic_torch_save(model_state_dict, state_dict_path)
         self.logger.info(
             f"[{self.__class__.__name__}] Saved incumbent model state dict to "
             f"{state_dict_path}"
