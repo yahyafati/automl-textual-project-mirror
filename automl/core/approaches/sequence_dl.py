@@ -25,11 +25,16 @@ from automl.logger import get_logger
 logger = get_logger()
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=4)
 def _load_pretrained_word_embeddings(model_name: str) -> torch.Tensor:
     """Load (and cache) just the pretrained token embedding matrix for
     `model_name`, used to warm-start the BiLSTM's embedding layer instead
     of starting from scratch.
+
+    `model_name` is HPO-tunable (`seq_pretrained_model_name`), so maxsize
+    matches `SequenceDLApproach.MODEL_NAME_CHOICES`'s length - otherwise a
+    single-slot cache would evict on every model switch, defeating both
+    this cache and the ifBO prewarm loop that iterates every choice.
     """
     logger.info(f"Loading pretrained embedding matrix from '{model_name}'.")
     model = AutoModel.from_pretrained(model_name)
@@ -155,8 +160,19 @@ class BiLSTMClassifier(nn.Module):
 @register_approach("sequence-dl")
 class SequenceDLApproach(Approach[torch.nn.Module, dict]):
 
-    TOKENIZER_PATH = "./tokenizers/distilbert-base-uncased"
-    EMBEDDING_MODEL_NAME = "distilbert-base-uncased"
+    TOKENIZERS_DIR = "./tokenizers"
+    DEFAULT_MODEL_NAME = "distilbert-base-uncased"
+    # Vendored locally under TOKENIZERS_DIR (see save_tokenizer.py); the
+    # `seq_pretrained_model_name` hyperparameter picks between these.
+    # Tokenizer and embedding source are always the same model, since the
+    # BiLSTM's vocab indices must line up with whichever embedding matrix
+    # warm-starts it.
+    MODEL_NAME_CHOICES = (
+        "distilbert-base-uncased",
+        "bert-base-uncased",
+        "google/bert_uncased_L-4_H-512_A-8",
+        "microsoft/xtremedistil-l6-h256-uncased",
+    )
 
     def __init__(
         self,
@@ -185,6 +201,8 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         self.tokenizer: Optional[PreTrainedTokenizerBase] = None
         self._pad_id: int = 0
         self._sep_token_id: Optional[int] = None
+        self._model_name: str = self.DEFAULT_MODEL_NAME
+        self._tokenizer_path: str = f"{self.TOKENIZERS_DIR}/{self._model_name}"
 
     def initialize(self):
         pass
@@ -203,12 +221,15 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         num_layers = int(self.get_param_value("seq_num_layers"))
         dropout = float(self.get_param_value("dropout"))
         batch_size = int(self.get_param_value("batch_size"))
+        self._model_name = self.get_param_value("seq_pretrained_model_name")
+        self._tokenizer_path = f"{self.TOKENIZERS_DIR}/{self._model_name}"
 
         logger.debug(
             f"[{self.name}] prepare(): max_seq_len={max_seq_len}, "
             f"embed_dim={embed_dim}, hidden_dim={hidden_dim}, "
             f"num_layers={num_layers}, dropout={dropout}, "
-            f"batch_size={batch_size}, num_workers={self._num_worker}."
+            f"batch_size={batch_size}, model_name={self._model_name}, "
+            f"num_workers={self._num_worker}."
         )
 
         # Build vocab on train text
@@ -227,8 +248,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         # train_labels = self.label_encoder.fit_transform(train_labels)
         # val_labels = self.label_encoder.transform(val_labels)
 
-        # TODO: Add to configspace
-        self.tokenizer = load_tokenizer(self.TOKENIZER_PATH)
+        self.tokenizer = load_tokenizer(self._tokenizer_path)
         assert self.tokenizer is not None, "Tokenizer is None"
         self._pad_id = (
             self.tokenizer.pad_token_id
@@ -241,10 +261,10 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         # `encode_texts_cached`); only truncation to this trial's
         # `max_seq_len` happens below, in `TextSequenceDataset`.
         train_full_ids = encode_texts_cached(
-            train_texts, self.tokenizer, self.TOKENIZER_PATH
+            train_texts, self.tokenizer, self._tokenizer_path
         )
         val_full_ids = encode_texts_cached(
-            val_texts, self.tokenizer, self.TOKENIZER_PATH
+            val_texts, self.tokenizer, self._tokenizer_path
         )
 
         train_ds = TextSequenceDataset(
@@ -278,7 +298,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         # Build model
         vocab_size = self.tokenizer.vocab_size
         pretrained_embeddings = _pretrained_embedding_init(
-            self.EMBEDDING_MODEL_NAME, vocab_size, embed_dim
+            self._model_name, vocab_size, embed_dim
         )
         self.model = BiLSTMClassifier(
             vocab_size=vocab_size,
@@ -392,7 +412,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             texts = data["text"].tolist()
             labels = data["label"].tolist()
 
-            full_ids = encode_texts_cached(texts, self.tokenizer, self.TOKENIZER_PATH)
+            full_ids = encode_texts_cached(texts, self.tokenizer, self._tokenizer_path)
             ds = TextSequenceDataset(
                 full_ids,
                 labels=labels,

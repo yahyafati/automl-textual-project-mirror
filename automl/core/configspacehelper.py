@@ -68,6 +68,20 @@ def build_config_space(
         optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adamw")
         seq_embed_dim = Categorical("seq_embed_dim", [32, 64, 128, 256], default=128)
         seq_num_layers = Integer("seq_num_layers", (1, 3), default=1)
+        # Tokenizer + pretrained-embedding source used to warm-start the
+        # BiLSTM's embedding layer (see `_pretrained_embedding_init` in
+        # approaches/sequence_dl.py). Tokenizer and embedding always come
+        # from the same model, so this single choice drives both.
+        seq_pretrained_model_name = Categorical(
+            "seq_pretrained_model_name",
+            [
+                "distilbert-base-uncased",
+                "bert-base-uncased",
+                "google/bert_uncased_L-4_H-512_A-8",
+                "microsoft/xtremedistil-l6-h256-uncased",
+            ],
+            default="distilbert-base-uncased",
+        )
 
         hyperparams += [
             hidden_dim,
@@ -75,6 +89,7 @@ def build_config_space(
             optimizer,
             seq_embed_dim,
             seq_num_layers,
+            seq_pretrained_model_name,
         ]
 
     elif fixed_model_type == "transformer":

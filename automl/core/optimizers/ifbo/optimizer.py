@@ -193,7 +193,13 @@ class IfboOptimizer(Optimizer):
                 _load_pretrained_word_embeddings,
             )
 
-            _load_pretrained_word_embeddings(SequenceDLApproach.EMBEDDING_MODEL_NAME)
+            # `seq_pretrained_model_name` is HPO-tunable (see
+            # configspacehelper.build_config_space), so prewarm every choice
+            # it could sample rather than just one, to avoid the same
+            # download/load race for whichever choice the first parallel
+            # batch happens to draw.
+            for model_name in SequenceDLApproach.MODEL_NAME_CHOICES:
+                _load_pretrained_word_embeddings(model_name)
 
         elif runtime_config["approach"] == "transformer":
             from transformers import AutoModel
