@@ -97,7 +97,7 @@ def build_config_space(
         # while keeping the more generic lower layers fixed. See
         # `TransformerClassifier`/`_freeze_base_by_ratio` in
         # `approaches/transformer.py`.
-        freeze_ratio = Float("freeze_ratio", (0.0, 1.0), default=0.0)
+        freeze_ratio = Float("freeze_ratio", (0.75, 1.0), default=0.75)
 
         hyperparams += [
             learning_rate,
