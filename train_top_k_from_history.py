@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import shutil
 import sys
 from pathlib import Path
@@ -27,13 +28,14 @@ from automl.core.utils.misc import (
     save_incumbent,
     set_seed,
 )
-from automl.logger import get_logger
+from automl.logger import get_logger, setup_logging
 
 logger = get_logger("")
 
 MANIFEST_FILENAME = "manifest.json"
 HISTORY_COPY_FILENAME = "history.log.jsonl"
 HELDOUT_LABELS_FILENAME = "heldout_labels.npy"
+LOG_FILENAME = "app.log"
 
 DEFAULT_TOP_K = 5
 DEFAULT_EPOCHS = 50
@@ -513,11 +515,15 @@ def _pick(
 def main():
     args = parse_args()
 
-    logger.info("Registering all approaches")
-    registry.register_all_approaches()
-
     output_dir: Path = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    log_path = output_dir / LOG_FILENAME
+    setup_logging(output_path=log_path, level=logging.DEBUG)
+    logger.info(f"Logging to {log_path}")
+
+    logger.info("Registering all approaches")
+    registry.register_all_approaches()
 
     old_manifest = load_manifest(output_dir)
     resuming = old_manifest is not None
