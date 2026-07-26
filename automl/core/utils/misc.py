@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import Union, TypedDict, Any
 
@@ -8,6 +9,31 @@ from automl.core.types import TrainResult, EvaluationResult
 from automl.logger import get_logger
 
 logger = get_logger()
+
+
+def atomic_torch_save(obj: Any, path: Union[str, Path]) -> None:
+    """Writes `obj` via `torch.save` without ever leaving a truncated file at
+    `path`.
+
+    `torch.save` writes directly to its target file, so a process killed
+    mid-write (Ctrl-C, OOM-kill, crash) leaves a corrupt, half-written
+    checkpoint - `torch.load` on that file later fails with a miniz "failed
+    finding central directory" error, indistinguishable from real disk
+    corruption. Saving to a temp file in the same directory and
+    `os.replace`-ing it into place makes the swap atomic: `path` always
+    either holds the previous complete checkpoint or the new one, never a
+    partial write.
+    """
+    import torch
+
+    path = Path(path)
+    tmp_path = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    try:
+        torch.save(obj, tmp_path)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def set_seed(seed: int) -> None:

@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 
 from automl.core.trainers.base_trainer import Trainer
 from automl.core.types import TrainResult, ApproachName, EpochResult
+from automl.core.utils.misc import atomic_torch_save
 from automl.logger import get_logger
 
 logger = get_logger()
@@ -361,7 +362,7 @@ class TorchTrainer(Trainer):
             }
 
         path = Path(path)
-        torch.save(checkpoint, path)
+        atomic_torch_save(checkpoint, path)
         logger.debug(f"Checkpoint successfully saved to {path}")
 
     def train(
