@@ -385,7 +385,7 @@ Rakotoarison et al. ICML 2024) using the pretrained **FT-PFN** surrogate from th
     queried for each pending candidate's PI at that horizon, using all already-observed
     candidates' curves as in-context "training data." Selection is then either greedy
     (argmax PI, `ifbo_greedy_candidate_selection=True`) or stochastic (softmax over PI
-    scores). A `use_random_selection` flag bypasses the surrogate entirely (uniform
+    scores). A `ifbo_use_random_selection` flag bypasses the surrogate entirely (uniform
     baseline).
   - The selected candidate is "thawed" for `h_rand` more steps, resuming from its saved
     trainer checkpoint.
@@ -473,7 +473,7 @@ Notable fields: `dataset`, `approach` (only `sequence-dl` works), `optimizer`
 (`smac`/`random`/`ifbo`/`rl_freeze_thaw`), `evaluation_budget`/`max_budget`/`min_budget`/
 `n_trials`, `max_num_rows`, `val_size`, `num_workers`, `num_parallel_trials`,
 `stochastic_epochs`/`stochastic_epoch_fraction`, ifBO-specific
-(`use_random_selection`, `ifbo_greedy_candidate_selection`,
+(`ifbo_use_random_selection`, `ifbo_greedy_candidate_selection`,
 `ifbo_incumbent_ensemble_top_k`, `ifbo_incumbent_ensemble_accuracy_threshold`).
 
 The repo root's `runconfig.yml` is checked in with: `dataset: yelp`, `seed: 67`,

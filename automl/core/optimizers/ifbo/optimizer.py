@@ -78,7 +78,7 @@ class IfboOptimizer(Optimizer):
                 f"got {self.initial_epsilon}."
             )
 
-        self.use_random_selection = runtime_config.get("use_random_selection")
+        self.ifbo_use_random_selection = runtime_config.get("ifbo_use_random_selection")
         self.greedy_selection = runtime_config.get("ifbo_greedy_candidate_selection")
         self.incumbent_ensemble_top_k: int = runtime_config.get(
             "ifbo_incumbent_ensemble_top_k"
@@ -110,7 +110,7 @@ class IfboOptimizer(Optimizer):
         self.logger.info(
             "[IfboOptimizer] Initialized with dynamic candidates, budgets in [%d, %d], "
             "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f, "
-            "use_random_selection=%s, greedy_selection=%s, "
+            "ifbo_use_random_selection=%s, greedy_selection=%s, "
             "incumbent_ensemble_top_k=%d, incumbent_ensemble_accuracy_threshold=%.4f",
             self.min_budget,
             self.max_budget,
@@ -118,7 +118,7 @@ class IfboOptimizer(Optimizer):
             self.total_steps,
             self.hp_space.dim,
             self.initial_epsilon,
-            self.use_random_selection,
+            self.ifbo_use_random_selection,
             self.greedy_selection,
             self.incumbent_ensemble_top_k,
             self.incumbent_ensemble_accuracy_threshold,
@@ -455,7 +455,7 @@ class IfboOptimizer(Optimizer):
             return candidate
 
         # For baselines
-        if self.use_random_selection:
+        if self.ifbo_use_random_selection:
             candidate = self._rng.choice(pending)
             return candidate
 

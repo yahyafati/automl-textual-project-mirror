@@ -33,15 +33,15 @@ install[poetry]: install-poetry-env ## Alias for installing project dependencies
 init: download-datasets tokenizers load-ftpfn ## Download datasets, tokenizers, and FTPFN dependency/model.
 
 download-datasets: ## Download and extract all exam datasets into ./data.
-	$(PYTHON) download-datasets.py
+	$(PYTHON) scripts/download-datasets.py
 
 tokenizers: ## Download tokenizer files into ./tokenizers.
 	@for model in $(TOKENIZER_MODELS); do \
-		$(PYTHON) save_tokenizer.py --model-name "$$model"; \
+		$(PYTHON) scripts/save_tokenizer.py --model-name "$$model"; \
 	done
 
 load-ftpfn: ## Import/load FTPFN once so required assets are initialized.
-	$(PYTHON) load-ftpfn.py
+	$(PYTHON) scripts/load-ftpfn.py
 
 run: ## Run AutoML for one dataset. Usage: make run DATASET=amazon ARGS="--seed 42"
 	@if ! echo "$(DATASETS)" | grep -wq "$(DATASET)"; then \

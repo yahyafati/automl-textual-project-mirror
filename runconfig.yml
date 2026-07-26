@@ -19,7 +19,7 @@ val_size: 0.1
 
 max_trainers_in_memory: 2
 log_level: INFO
-use_random_selection: false
+ifbo_use_random_selection: false
 ifbo_greedy_candidate_selection: true
 ifbo_incumbent_ensemble_top_k: 3
 ifbo_incumbent_ensemble_accuracy_threshold: 0.05

@@ -290,7 +290,7 @@ more diverse coverage of the pending pool. `runconfig.yml` in this repo sets
 `ifbo_greedy_candidate_selection: true`, i.e. the exam configuration actually runs the
 paper-faithful arg-max variant.
 
-A third mode, `use_random_selection`, bypasses the surrogate entirely (uniform choice
+A third mode, `ifbo_use_random_selection`, bypasses the surrogate entirely (uniform choice
 among pending candidates) — a debugging/ablation baseline, not used in the final config.
 
 ---
