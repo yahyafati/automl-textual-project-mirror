@@ -132,40 +132,50 @@ class HyperparameterSpace:
         if len(specs) == 0:
             raise ValueError("HyperparameterSpace needs at least one hyperparameter.")
 
-        # Priority order = the order hyperparameters were passed in (kwargs
-        # preserve insertion order). In this project the caller
-        # (`IfboOptimizer._build_hp_space`) iterates
-        # `ConfigurationSpace.get_hyperparameters()`, which returns
-        # hyperparameters alphabetically by name - not by importance - so
-        # any overflow beyond MAX_HYPERPARAMETERS is dropped alphabetically
-        # last, not "least important". Explicitly list anything that should
-        # never survive the cut in `hyperparams_to_drop` below instead of
-        # relying on where it happens to sort.
         all_names = list(specs.keys())
 
-        # `model_type` is always dropped defensively here too, though in
-        # this project it's already filtered out earlier as a
-        # `ConfigSpace.Constant` (see `_build_hp_space`). `warmup_ratio` and
-        # `seq_num_layers` are dropped because, of the sequence-dl/transformer
-        # search spaces' hyperparameters, they're judged to have the
-        # smallest expected effect on validation accuracy - see
-        # `docs/IFBO_METHOD.md` §3 for the full reasoning.
-        hyperparams_to_drop = ["model_type", "warmup_ratio", "seq_num_layers"]
-        all_names = [name for name in all_names if name not in hyperparams_to_drop]
+        # `model_type` is dropped unconditionally regardless of how much
+        # headroom the space has - it's a `ConfigSpace.Constant`, constant
+        # for the whole run, and so carries zero information for the
+        # surrogate no matter the dimension budget. In this project it's
+        # already filtered out earlier too (see `_build_hp_space`); this is
+        # a defensive second filter for any other caller of this class.
+        all_names = [name for name in all_names if name != "model_type"]
+
+        # Everything else is only dropped if the space still doesn't fit
+        # MAX_HYPERPARAMETERS afterwards, and then only as many - in this
+        # order, least-useful-first - as needed to fit. This is a priority
+        # list, not an unconditional drop list: e.g. `transformer`'s space
+        # already fits within the cap without dropping `warmup_ratio`, so it
+        # keeps it, while `sequence-dl` needs both entries dropped to fit.
+        # See `docs/IFBO_METHOD.md` §3 for the reasoning behind this
+        # ordering (a judgment call, not a rigorous ablation).
+        drop_priority = ["warmup_ratio", "seq_num_layers"]
+
+        dropped_names: list[str] = []
+        for name in drop_priority:
+            if len(all_names) <= MAX_HYPERPARAMETERS:
+                break
+            if name in all_names:
+                all_names.remove(name)
+                dropped_names.append(name)
 
         if len(all_names) > MAX_HYPERPARAMETERS:
             kept_names = all_names[:MAX_HYPERPARAMETERS]
-            dropped_names = all_names[MAX_HYPERPARAMETERS:]
+            overflow_names = all_names[MAX_HYPERPARAMETERS:]
+            dropped_names += overflow_names
             logger.warning(
                 f"FT-PFN surrogate supports at most {MAX_HYPERPARAMETERS} "
-                f"hyperparameters, but got {len(all_names)}. Keeping the first "
-                f"{MAX_HYPERPARAMETERS} (by priority order): {kept_names}. "
-                f"Dropping: {dropped_names}.",
+                f"hyperparameters; after priority-dropping {drop_priority}, "
+                f"{len(all_names)} remain. Keeping the first "
+                f"{MAX_HYPERPARAMETERS} (in `ConfigurationSpace.get_hyperparameters()` "
+                f"order, which is alphabetical - not by importance): {kept_names}. "
+                f"Dropping: {overflow_names}. Add these to `drop_priority` above "
+                f"instead of relying on this fallback.",
                 stacklevel=2,
             )
         else:
             kept_names = all_names
-            dropped_names = []
 
         self.names = kept_names
         self.specs = {name: specs[name] for name in kept_names}
