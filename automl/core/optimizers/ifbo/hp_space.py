@@ -133,11 +133,24 @@ class HyperparameterSpace:
             raise ValueError("HyperparameterSpace needs at least one hyperparameter.")
 
         # Priority order = the order hyperparameters were passed in (kwargs
-        # preserve insertion order), i.e. the caller lists their most
-        # important hyperparameters first.
+        # preserve insertion order). In this project the caller
+        # (`IfboOptimizer._build_hp_space`) iterates
+        # `ConfigurationSpace.get_hyperparameters()`, which returns
+        # hyperparameters alphabetically by name - not by importance - so
+        # any overflow beyond MAX_HYPERPARAMETERS is dropped alphabetically
+        # last, not "least important". Explicitly list anything that should
+        # never survive the cut in `hyperparams_to_drop` below instead of
+        # relying on where it happens to sort.
         all_names = list(specs.keys())
 
-        hyperparams_to_drop = ["model_type", "warmup_ratio"]
+        # `model_type` is always dropped defensively here too, though in
+        # this project it's already filtered out earlier as a
+        # `ConfigSpace.Constant` (see `_build_hp_space`). `warmup_ratio` and
+        # `seq_num_layers` are dropped because, of the sequence-dl/transformer
+        # search spaces' hyperparameters, they're judged to have the
+        # smallest expected effect on validation accuracy - see
+        # `docs/IFBO_METHOD.md` §3 for the full reasoning.
+        hyperparams_to_drop = ["model_type", "warmup_ratio", "seq_num_layers"]
         all_names = [name for name in all_names if name not in hyperparams_to_drop]
 
         if len(all_names) > MAX_HYPERPARAMETERS:

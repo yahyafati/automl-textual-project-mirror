@@ -136,27 +136,47 @@ Three `HPSpec` subclasses cover every hyperparameter type present in `build_conf
   0 or 1 (which would sit on the space's boundary).
 
 `HyperparameterSpace` (the container) enforces FT-PFN's hard architectural limit of
-**`MAX_HYPERPARAMETERS = 10`** input dimensions. Given the 11 real hyperparameters plus
-the constant `model_type` in this project's search space:
+**`MAX_HYPERPARAMETERS = 10`** input dimensions. `build_config_space()` declares 13
+hyperparameters for `sequence-dl` (7 shared + 6 sequence-dl-specific) and 11 for
+`transformer` (7 shared + 4 transformer-specific):
 
-1. `model_type` (a `ConfigSpace.Constant`) is dropped unconditionally — a constant
-   carries no information for the surrogate.
-2. `warmup_ratio` is also dropped unconditionally (hard-coded in
-   `hyperparams_to_drop`, `hp_space.py:140`) — chosen because it consistently has the
-   smallest measured effect on validation accuracy versus the other 10 hyperparameters,
-   getting the count under the 10-dimension cap without needing to drop something with
-   larger expected impact (e.g. `learning_rate` or `hidden_dim`).
-3. The remaining hyperparameters are kept in the order they were declared to
-   `HyperparameterSpace(**specs)`, which — since Python kwargs preserve insertion
-   order — is exactly the declaration order in `_build_hp_space()`'s loop over
-   `cs.get_hyperparameters()`. Anything still beyond the cap would be dropped with a
-   logged warning, but with the current 10-hyperparameter search space this never
-   triggers.
+1. `model_type` (a `ConfigSpace.Constant`) is dropped unconditionally, in two places
+   defensively — `_build_hp_space()` filters it out before it ever reaches
+   `HyperparameterSpace`, and it's also listed in `hyperparams_to_drop` — because a
+   constant carries no information for the surrogate.
+2. `warmup_ratio` and `seq_num_layers` are also dropped unconditionally (hard-coded in
+   `hyperparams_to_drop`, `hp_space.py:140`). Neither is based on a rigorous ablation —
+   they're a judgment call that these two are expected to move validation accuracy the
+   least of the search spaces' hyperparameters: `warmup_ratio` across both spaces, and
+   `seq_num_layers` (BiLSTM depth, range 1-3) specifically for `sequence-dl`, where
+   depth beyond 1-2 layers tends to have marginal effect on short-review text
+   classification once `hidden_dim` and the pretrained-embedding warm start are already
+   doing the heavy lifting. Deliberately *not* dropped despite also looking "minor":
+   `scheduler` and `optimizer` — ifBO's freeze-thaw extrapolation depends on the shape
+   of the learning curve, and both directly shape it, so hiding them from the surrogate
+   would undermine the method's core mechanism more than losing a less curve-relevant
+   axis like `seq_num_layers` does.
+3. The remaining hyperparameters are kept in whatever order
+   `ConfigurationSpace.get_hyperparameters()` yields them in `_build_hp_space()`'s
+   loop — which is **alphabetical by name**, not insertion/declaration order (despite
+   `HyperparameterSpace.__init__`'s docstring describing it as "priority order"; that
+   description only holds if the caller actually passes hyperparameters in priority
+   order, which this project's caller doesn't). Anything still beyond the cap after the
+   drops above would be truncated alphabetically-last with a logged warning — this is
+   what silently dropped `weight_decay` for `sequence-dl` for a period before
+   `seq_num_layers` was added to `hyperparams_to_drop` to fix it explicitly.
 
-The resulting encoder has `dim = 10`. A configuration λ (a `dict`) is encoded to
-z ∈ [0,1]^10 by `HyperparameterSpace.encode()`; any hyperparameter absent or `None`
-(inactive under some `ConfigSpace` condition — not currently used in this space, but
-handled defensively) maps to the neutral value 0.5.
+With the explicit drops in place, both search spaces now fit `MAX_HYPERPARAMETERS`
+without hitting the alphabetical-overflow fallback: `sequence-dl` lands at exactly
+`dim = 10` (13 declared − `model_type` − `warmup_ratio` − `seq_num_layers`), and
+`transformer` at `dim = 9` (11 declared − `model_type` − `warmup_ratio`, no
+`seq_num_layers` to drop since that hyperparameter doesn't exist in that space) — one
+spare slot of headroom before the cap needs revisiting again.
+
+A configuration λ (a `dict`) is encoded to z ∈ [0,1]^dim by
+`HyperparameterSpace.encode()`; any hyperparameter absent or `None` (inactive under
+some `ConfigSpace` condition — not currently used in this space, but handled
+defensively) maps to the neutral value 0.5.
 
 ---
 
