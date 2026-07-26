@@ -31,12 +31,12 @@ def build_config_space(
 
     # --- hyperparameters shared by every approach (consumed generically by
     # TorchTrainer / Approach.get_param_value, regardless of architecture) ---
-    dropout = Float("dropout", (0.0, 0.5), default=0.1)
+    dropout = Float("dropout", (0.0, 0.5), default=0.2)
     weight_decay = Float("weight_decay", (1e-6, 1e-2), default=1e-4, log=True)
     scheduler = Categorical(
         "scheduler",
         ["steplr", "cosineannealinglr", "exponentiallr", "reducelronplateau"],
-        default="steplr",
+        default="cosineannealinglr",
     )
     batch_size = Categorical("batch_size", [32, 64, 128, 256], default=64)
 
@@ -47,7 +47,7 @@ def build_config_space(
     # ~linearly with token count, so trials sampling 1024 cost 4-8x a trial
     # sampling 128 for little accuracy gain on star-rating classification,
     # where most signal is in the first ~256 tokens of a review.
-    max_seq_length = Categorical("max_seq_length", [64, 128, 256], default=128)
+    max_seq_length = Categorical("max_seq_length", [64, 128, 256, 512], default=128)
 
     warmup_ratio = Float("warmup_ratio", (0.0, 0.2), default=0.1)
 
@@ -65,8 +65,8 @@ def build_config_space(
         # --- sequence-dl (BiLSTM, trained from scratch) hyperparameters ---
         hidden_dim = Categorical("hidden_dim", [32, 64, 128, 256], default=128)
         learning_rate = Float("learning_rate", (1e-4, 1e-2), default=1e-3, log=True)
-        optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adam")
-        seq_embed_dim = Integer("seq_embed_dim", (32, 512), default=128, log=True)
+        optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adamw")
+        seq_embed_dim = Categorical("seq_embed_dim", [32, 64, 128, 256], default=128)
         seq_num_layers = Integer("seq_num_layers", (1, 3), default=1)
 
         hyperparams += [

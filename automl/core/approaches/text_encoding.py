@@ -148,7 +148,7 @@ def collate_sequences(batch, pad_value: int = 0):
     else:
         sequences, labels = batch, None
 
-    lengths = [seq.size(0) for seq in sequences]
+    lengths: list[int] = [seq.size(0) for seq in sequences]
     max_len = max(max(lengths), 1)  # guard against an all-empty batch
     padded = torch.full((len(sequences), max_len), pad_value, dtype=torch.long)
     for i, seq in enumerate(sequences):
