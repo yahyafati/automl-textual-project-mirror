@@ -29,7 +29,7 @@ TRANSFORMER_DEFAULT_CONFIG = {
     "transformer_model_name": "distilbert-base-uncased",
     "max_seq_length": 128,
     "dropout": 0.1,
-    "freeze_base": False,
+    "freeze_ratio": 0.0,
     "batch_size": 32,
     "epochs": 5,
     "optimizer": "adamw",

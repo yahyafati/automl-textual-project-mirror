@@ -67,7 +67,8 @@ Optimizer   (automl/core/optimizers/*)         decides WHICH config to try next,
 - **Approaches** (`--approach`): `sequence-dl` (BiLSTM over a DistilBERT WordPiece
   vocab, trained from scratch with an SVD-projected pretrained-embedding warm start)
   and `transformer` (a pretrained encoder fine-tuned end-to-end, optionally with
-  `freeze_base` for linear-probing). Registered via `@register_approach("name")`
+  `freeze_ratio` to freeze a bottom fraction of the base's layers, up to
+  full linear-probing at `1.0`). Registered via `@register_approach("name")`
   (`automl/core/registry.py`) and auto-discovered at startup by
   `register_all_approaches()`, which imports every submodule under
   `automl/core/approaches/`. Shared tokenization/caching/dataset code for both

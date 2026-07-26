@@ -24,8 +24,41 @@ from automl.logger import get_logger
 logger = get_logger()
 
 
+def _freeze_base_by_ratio(base: nn.Module, freeze_ratio: float) -> None:
+    """Freezes the lowest `freeze_ratio` fraction of `base`'s parameters.
+
+    Treats the embeddings and each transformer block as one freezable unit,
+    ordered bottom-up (closest to the input first) - lower layers encode
+    more generic, transferable features, so they're the ones frozen first.
+    `freeze_ratio=1.0` freezes every unit (embeddings + all blocks, i.e.
+    linear-probe mode), `0.0` freezes nothing (full fine-tuning), and e.g.
+    `0.5` freezes the embeddings plus the lower half of the blocks.
+    """
+    if freeze_ratio >= 1.0:
+        # Freeze every parameter outright, including ones not covered by
+        # the unit list below (e.g. BERT's pooler) - "1.0" should mean
+        # linear-probing with a fully-fixed base, not "everything the unit
+        # list happens to enumerate."
+        for param in base.parameters():
+            param.requires_grad_(False)
+        return
+
+    if hasattr(base, "encoder") and hasattr(base.encoder, "layer"):
+        blocks = list(base.encoder.layer)  # BERT-style
+    elif hasattr(base, "transformer") and hasattr(base.transformer, "layer"):
+        blocks = list(base.transformer.layer)  # DistilBERT-style
+    else:
+        raise ValueError(f"Don't know how to locate transformer blocks on {type(base)}")
+
+    units: list[nn.Module] = [base.embeddings, *blocks]
+    num_freeze = round(freeze_ratio * len(units))
+    for unit in units[:num_freeze]:
+        for param in unit.parameters():
+            param.requires_grad_(False)
+
+
 class TransformerClassifier(nn.Module):
-    """A pretrained transformer encoder fine-tuned with a linear classification
+    """A pretrained transformer encoder fine-tuned with a classification
     head on top.
 
     Where `BiLSTMClassifier` (sequence_dl.py) only ever borrows a pretrained
@@ -47,18 +80,26 @@ class TransformerClassifier(nn.Module):
         num_classes: int,
         pad_token_id: int,
         dropout: float = 0.1,
-        freeze_base: bool = False,
+        freeze_ratio: float = 0.0,
     ):
         super().__init__()
         self.pad_token_id = pad_token_id
         self.base = AutoModel.from_pretrained(model_name)
-        if freeze_base:
-            # Linear-probe mode: keep the pretrained representations fixed
-            # and only train the classification head on top of them.
-            for param in self.base.parameters():
-                param.requires_grad_(False)
+        if freeze_ratio > 0.0:
+            _freeze_base_by_ratio(self.base, freeze_ratio)
+        hidden_size = self.base.config.hidden_size
+        # A small MLP head (Linear -> GELU -> LayerNorm -> Dropout ->
+        # Linear) instead of a bare `Dropout -> Linear` on top of the CLS
+        # token: the extra projection gives the head room to reshape the
+        # pretrained representation for the target task, and the LayerNorm
+        # keeps that projection's output well-scaled - useful in particular
+        # when `freeze_ratio` is high and the head is doing most of the
+        # adapting.
+        self.pre_classifier = nn.Linear(hidden_size, hidden_size)
+        self.activation = nn.GELU()
+        self.layer_norm = nn.LayerNorm(hidden_size)
         self.dropout = nn.Dropout(dropout)
-        self.classifier = nn.Linear(self.base.config.hidden_size, num_classes)
+        self.classifier = nn.Linear(hidden_size, num_classes)
 
     def forward(self, input_ids):
         attention_mask = (input_ids != self.pad_token_id).long()
@@ -69,7 +110,8 @@ class TransformerClassifier(nn.Module):
         # sequence (see `text_encoding.truncate_ids`'s docstring), so
         # position 0 always holds it, regardless of truncation.
         cls_hidden = last_hidden_state[:, 0, :]
-        return self.classifier(self.dropout(cls_hidden))
+        pooled = self.layer_norm(self.activation(self.pre_classifier(cls_hidden)))
+        return self.classifier(self.dropout(pooled))
 
 
 @register_approach("transformer")
@@ -127,13 +169,13 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
         max_seq_len = int(self.get_param_value("max_seq_length"))
         model_name = self.get_param_value("transformer_model_name")
         classifier_dropout = float(self.get_param_value("dropout"))
-        freeze_base = bool(self.get_param_value("freeze_base"))
+        freeze_ratio = float(self.get_param_value("freeze_ratio"))
         batch_size = int(self.get_param_value("batch_size"))
 
         logger.debug(
             f"[{self.name}] prepare(): max_seq_len={max_seq_len}, "
             f"model_name={model_name}, classifier_dropout={classifier_dropout}, "
-            f"freeze_base={freeze_base}, batch_size={batch_size}, "
+            f"freeze_ratio={freeze_ratio}, batch_size={batch_size}, "
             f"num_workers={self._num_worker}."
         )
 
@@ -200,7 +242,7 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
             num_classes=self._num_classes,
             pad_token_id=self._pad_id,
             dropout=classifier_dropout,
-            freeze_base=freeze_base,
+            freeze_ratio=freeze_ratio,
         )
         self.model.to(self._device)
 

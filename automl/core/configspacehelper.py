@@ -90,15 +90,20 @@ def build_config_space(
             ["distilbert-base-uncased", "bert-base-uncased"],
             default="distilbert-base-uncased",
         )
-        # Linear-probe (True: only the classification head trains) vs. full
-        # fine-tuning (False, the usual "pretrained transformer" recipe).
-        freeze_base = Categorical("freeze_base", [False, True], default=False)
+        # Fraction of the pretrained base's layers to freeze, ordered
+        # bottom-up (embeddings first): 0.0 fine-tunes the whole base
+        # (default), 1.0 is linear-probe mode (only the classification head
+        # trains), and values in between gradually unfreeze the top layers
+        # while keeping the more generic lower layers fixed. See
+        # `TransformerClassifier`/`_freeze_base_by_ratio` in
+        # `approaches/transformer.py`.
+        freeze_ratio = Float("freeze_ratio", (0.0, 1.0), default=0.0)
 
         hyperparams += [
             learning_rate,
             optimizer,
             transformer_model_name,
-            freeze_base,
+            freeze_ratio,
         ]
 
     else:
