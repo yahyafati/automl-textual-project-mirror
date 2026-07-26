@@ -125,7 +125,12 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
     DEFAULT_MODEL_NAME = "distilbert-base-uncased"
     # Vendored locally under TOKENIZERS_DIR (see save_tokenizer.py); the
     # `transformer_model_name` hyperparameter picks between these.
-    MODEL_NAME_CHOICES = ("distilbert-base-uncased", "bert-base-uncased")
+    MODEL_NAME_CHOICES = (
+        "distilbert-base-uncased",
+        "bert-base-uncased",
+        "google/bert_uncased_L-4_H-512_A-8",
+        "microsoft/xtremedistil-l6-h256-uncased",
+    )
 
     def __init__(
         self,

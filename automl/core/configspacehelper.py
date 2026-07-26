@@ -87,7 +87,12 @@ def build_config_space(
         optimizer = Categorical("optimizer", ["adamw", "adam"], default="adamw")
         transformer_model_name = Categorical(
             "transformer_model_name",
-            ["distilbert-base-uncased", "bert-base-uncased"],
+            [
+                "distilbert-base-uncased",
+                "bert-base-uncased",
+                "google/bert_uncased_L-4_H-512_A-8",
+                "microsoft/xtremedistil-l6-h256-uncased",
+            ],
             default="distilbert-base-uncased",
         )
         # Fraction of the pretrained base's layers to freeze, ordered

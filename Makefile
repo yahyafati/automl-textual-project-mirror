@@ -2,7 +2,7 @@ PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 POETRY ?= poetry
 
-TOKENIZER_MODELS ?= distilbert-base-uncased bert-base-uncased
+TOKENIZER_MODELS ?= distilbert-base-uncased bert-base-uncased google/bert_uncased_L-4_H-512_A-8 microsoft/xtremedistil-l6-h256-uncased
 FORMAT_PATHS ?= .
 DATASETS := amazon ag_news imdb dbpedia
 DATASET ?= amazon
