@@ -66,7 +66,9 @@ def build_config_space(
         hidden_dim = Categorical("hidden_dim", [32, 64, 128, 256], default=128)
         learning_rate = Float("learning_rate", (1e-4, 1e-2), default=1e-3, log=True)
         optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adamw")
-        seq_embed_dim = Categorical("seq_embed_dim", [32, 64, 128, 256], default=128)
+        seq_embed_dim = Categorical(
+            "seq_embed_dim", [32, 64, 128, 256, 512], default=128
+        )
         seq_num_layers = Integer("seq_num_layers", (1, 3), default=1)
         # Tokenizer + pretrained-embedding source used to warm-start the
         # BiLSTM's embedding layer (see `_pretrained_embedding_init` in
