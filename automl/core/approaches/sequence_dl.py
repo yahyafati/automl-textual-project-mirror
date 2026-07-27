@@ -352,6 +352,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         epochs: int = 10,
         load_path: Optional[Path] = None,
         evaluate_validation=True,
+        max_time_seconds: Optional[float] = None,
         **kwargs,
     ) -> TrainResult:
         assert self.model is not None
@@ -396,6 +397,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
                 warmup_ratio=warmup_ratio,
                 stochastic_epochs=self._stochastic_epochs,
                 stochastic_epoch_fraction=self._stochastic_epoch_fraction,
+                max_time_seconds=max_time_seconds,
             )
             self.trainer = trainer
         else:

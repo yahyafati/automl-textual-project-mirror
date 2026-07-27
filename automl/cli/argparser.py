@@ -21,6 +21,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     max_budget=40,
     min_budget=5,
     n_trials=10,
+    max_trial_time_seconds=None,
     enable_jsonl_history=True,
     max_num_rows=40_000,
     val_size=0.2,
@@ -69,6 +70,12 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-budget", type=int)
     parser.add_argument("--min-budget", type=int)
     parser.add_argument("--n-trials", type=int)
+    parser.add_argument(
+        "--max-trial-time-seconds",
+        type=float,
+        help="Wall-clock cap (in seconds) on a single trial's training call. "
+        "Checked once per epoch boundary. Default: None (no cap).",
+    )
     parser.add_argument("--max-num-rows", type=int)
     parser.add_argument("--val-size", type=float)
 

@@ -1,4 +1,5 @@
 import itertools
+import time
 import uuid
 from pathlib import Path
 from typing import Optional, TypedDict, Any, Union
@@ -63,6 +64,7 @@ class TorchTrainer(Trainer):
         warmup_ratio: float = 0.0,
         stochastic_epochs: bool = False,
         stochastic_epoch_fraction: Optional[float] = None,
+        max_time_seconds: Optional[float] = None,
     ):
         super().__init__(approach_name)
         self.trainer_id = uuid.uuid4().hex[:8]
@@ -73,6 +75,10 @@ class TorchTrainer(Trainer):
         self.epochs = epochs
         self.evaluate_validation = evaluate_validation
         self.max_grad_norm = max_grad_norm
+        # Wall-clock cap on this `train()` call, i.e. per-trial (not
+        # cumulative across ifBO's freeze-thaw resumes of the same
+        # candidate, each of which gets its own TorchTrainer/train() call).
+        self.max_time_seconds = max_time_seconds
 
         # Stochastic epochs: each "epoch" trains on a random fraction of
         # the training data instead of a full pass, so an epoch-budgeted
@@ -383,8 +389,21 @@ class TorchTrainer(Trainer):
                 f"Skipping training loop."
             )
 
+        start_time = time.monotonic()
+
         try:
             for epoch in range(self.start_epoch, self.epochs):
+                if (
+                    self.max_time_seconds is not None
+                    and time.monotonic() - start_time >= self.max_time_seconds
+                ):
+                    logger.info(
+                        f"[{self.trainer_id}]: Reached max_time_seconds="
+                        f"{self.max_time_seconds:.1f}s before epoch {epoch + 1}/"
+                        f"{self.epochs}; stopping early."
+                    )
+                    break
+
                 logger.debug(
                     f"--- [{self.trainer_id}] Epoch {epoch + 1}/{self.epochs} ---"
                 )

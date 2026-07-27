@@ -22,6 +22,15 @@ class RuntimeConfig(TypedDict):
     min_budget: int
     n_trials: int
 
+    # Wall-clock cap (in seconds) on a single trial's training call
+    # (`train_single_configuration`/`Approach.train`). `None` disables the
+    # cap (today's behavior). Checked once per epoch boundary, so training
+    # stops at the first epoch boundary at/after the deadline rather than
+    # being preempted mid-epoch. Primarily useful under `ifbo`, where the
+    # freeze-thaw scheduler can pick ever-larger epoch budgets for a
+    # candidate and a single trial could otherwise run arbitrarily long.
+    max_trial_time_seconds: Optional[float]
+
     max_num_rows: int
     val_size: float
 

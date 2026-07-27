@@ -500,6 +500,9 @@ class Optimizer(ABC):
                     result = _approach.train(
                         prepared_result,
                         epochs=int(budget),
+                        max_time_seconds=self.runtime_config.get(
+                            "max_trial_time_seconds"
+                        ),
                         **load_kwargs,
                     )
                     with checkpoint_lock:

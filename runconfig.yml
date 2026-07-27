@@ -11,6 +11,10 @@ min_budget: 5
 n_trials: 100
 optimizer: ifbo
 
+# Wall-clock cap (seconds) on a single trial's training call, checked once
+# per epoch boundary. null = no cap.
+max_trial_time_seconds: null
+
 approach: sequence-dl
 num_workers: 1 # TODO: I don't think this is being properly used
 num_parallel_trials: 2
