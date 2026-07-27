@@ -47,7 +47,7 @@ def build_config_space(
     # ~linearly with token count, so trials sampling 1024 cost 4-8x a trial
     # sampling 128 for little accuracy gain on star-rating classification,
     # where most signal is in the first ~256 tokens of a review.
-    max_seq_length = Categorical("max_seq_length", [64, 128, 256, 512], default=128)
+    max_seq_length = Categorical("max_seq_length", [64, 128, 256], default=128)
 
     warmup_ratio = Float("warmup_ratio", (0.0, 0.2), default=0.1)
 
