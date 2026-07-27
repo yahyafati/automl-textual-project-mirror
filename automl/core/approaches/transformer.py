@@ -144,7 +144,9 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
         self._num_worker: int = (
             num_workers
             if num_workers is not None
-            else self.get_param_value("num_workers")  # FIXME: Not a configuration param
+            else int(
+                self.get_param_value("num_workers")
+            )  # FIXME: Not a configuration param
         )
         self._stochastic_epochs: bool = bool(kwargs.get("stochastic_epochs", False))
         self._stochastic_epoch_fraction: Optional[float] = kwargs.get(
@@ -277,8 +279,8 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
         assert self.model is not None
 
         optimizer_name = self.get_param_value("optimizer")
-        lr = self.get_param_value("learning_rate")
-        weight_decay = self.get_param_value("weight_decay")
+        lr = float(self.get_param_value("learning_rate"))
+        weight_decay = float(self.get_param_value("weight_decay"))
 
         scheduler = self.get_param_value("scheduler")
         warmup_ratio = float(self.get_param_value("warmup_ratio"))
@@ -332,15 +334,16 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
         assert self.model is not None, "Model is not initialized"
         assert self.tokenizer is not None, "Tokenizer is not initialized"
 
-        max_seq_length = self.get_param_value("max_seq_length")
-        batch_size = self.get_param_value("batch_size")
+        max_seq_length = int(self.get_param_value("max_seq_length"))
+        batch_size = int(self.get_param_value("batch_size"))
+        num_workers = int(self.get_param_value("num_workers"))
         self.model.eval()
 
         if isinstance(data, pd.DataFrame):
             logger.debug(
                 f"[{self.name}] predict(): building DataLoader from a "
                 f"{len(data)}-row DataFrame (max_seq_length={max_seq_length}, "
-                f"batch_size={batch_size})."
+                f"batch_size={batch_size}, num_workers={num_workers})."
             )
             texts = data["text"].tolist()
             labels = data["label"].tolist()
