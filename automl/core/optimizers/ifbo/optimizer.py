@@ -92,7 +92,7 @@ class IfboOptimizer(Optimizer):
             )
 
         self.incumbent_ensemble_accuracy_threshold: float = float(
-            runtime_config.get("ifbo_incumbent_ensemble_accuracy_threshold", 0.01)
+            runtime_config.get("ifbo_incumbent_ensemble_accuracy_threshold")
         )
         if not 0.0 <= self.incumbent_ensemble_accuracy_threshold <= 1.0:
             raise ValueError(

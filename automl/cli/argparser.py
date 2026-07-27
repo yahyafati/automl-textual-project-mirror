@@ -32,7 +32,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     log_level="INFO",
     ifbo_use_random_selection=False,
     ifbo_greedy_candidate_selection=False,
-    ifbo_incumbent_ensemble_top_k=5,
+    ifbo_incumbent_ensemble_top_k=3,
     ifbo_incumbent_ensemble_accuracy_threshold=0.05,
     ifbo_thaw_step=1,
 )
