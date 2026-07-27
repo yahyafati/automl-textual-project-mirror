@@ -1,22 +1,15 @@
 from __future__ import annotations
 
-import itertools
-from typing import Optional
-
 from ConfigSpace import (
     Categorical,
     ConfigurationSpace,
-    EqualsCondition,
     Float,
     Integer,
-    InCondition,
-    ForbiddenLessThanRelation,
     Constant,
 )
 from ConfigSpace.conditions import Condition
 from ConfigSpace.hyperparameters import Hyperparameter
 
-from automl.core import registry
 from automl.logger import get_logger
 
 logger = get_logger()
