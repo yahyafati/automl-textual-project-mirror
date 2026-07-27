@@ -5,7 +5,7 @@ from typing import Union, Optional
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.nn.utils.rnn import pack_padded_sequence
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from ConfigSpace import Configuration
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase, AutoModel
@@ -128,7 +128,16 @@ class BiLSTMClassifier(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
         directions = 2 if bidirectional else 1
-        self.fc = nn.Linear(hidden_dim * directions, num_classes)
+        attn_dim = hidden_dim * directions
+        # Additive (Bahdanau-style) attention over every timestep's output,
+        # replacing classification off only the final hidden state: for
+        # longer reviews the decisive sentiment cue is often mid-text, not
+        # at the last token, so pooling over the whole sequence gives the
+        # classifier access to signal the final-state-only approach threw
+        # away.
+        self.attn_w = nn.Linear(attn_dim, attn_dim)
+        self.attn_v = nn.Linear(attn_dim, 1, bias=False)
+        self.fc = nn.Linear(attn_dim, num_classes)
 
     def forward(self, input_ids):
         # Derive real sequence lengths from padding and pack the batch
@@ -143,17 +152,25 @@ class BiLSTMClassifier(nn.Module):
         packed = pack_padded_sequence(
             emb, lengths.cpu(), batch_first=True, enforce_sorted=False
         )
-        _, (h_n, c_n) = self.lstm(packed)  # h_n: (num_layers*D, B, H)
+        packed_out, _ = self.lstm(packed)
+        # total_length restores the batch's original padded width (packing
+        # can otherwise trim trailing padding shared by every sequence in
+        # the batch), so the mask below lines up position-for-position with
+        # `input_ids`.
+        outputs, _ = pad_packed_sequence(
+            packed_out, batch_first=True, total_length=input_ids.size(1)
+        )  # (B, L, H*D)
 
-        # Use last layer’s hidden state, concatenate both directions
-        if self.lstm.bidirectional:
-            last_fwd = h_n[-2, :, :]  # (B, H)
-            last_bwd = h_n[-1, :, :]  # (B, H)
-            h = torch.cat([last_fwd, last_bwd], dim=1)
-        else:
-            h = h_n[-1, :, :]
-        h = self.dropout(h)
-        logits = self.fc(h)  # (B, num_classes)
+        mask = torch.arange(outputs.size(1), device=outputs.device)[None, :] < lengths[
+            :, None
+        ].to(outputs.device)
+        scores = self.attn_v(torch.tanh(self.attn_w(outputs))).squeeze(-1)  # (B, L)
+        scores = scores.masked_fill(~mask, float("-inf"))
+        weights = torch.softmax(scores, dim=1)  # (B, L)
+        context = torch.bmm(weights.unsqueeze(1), outputs).squeeze(1)  # (B, H*D)
+
+        context = self.dropout(context)
+        logits = self.fc(context)  # (B, num_classes)
         return logits
 
 
