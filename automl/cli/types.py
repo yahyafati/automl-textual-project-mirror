@@ -38,6 +38,12 @@ class RuntimeConfig(TypedDict):
     num_workers: int
     optimizer: str
 
+    # If False, skip retraining/evaluating the incumbent on held-out test
+    # data after optimization finishes (no predictions.npy / incumbent.json
+    # produced). Useful when only the HPO search history is wanted, e.g.
+    # before running train_top_k_from_history.py separately. Default: True.
+    evaluate_incumbent: bool
+
     # If True, each training epoch samples a random fraction of the
     # training batches (see `stochastic_epoch_fraction`) instead of
     # iterating the full dataset - trades per-epoch dataset coverage for

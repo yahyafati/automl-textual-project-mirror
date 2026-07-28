@@ -23,6 +23,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     n_trials=10,
     max_trial_time_seconds=None,
     enable_jsonl_history=True,
+    evaluate_incumbent=True,
     max_num_rows=40_000,
     val_size=0.2,
     optimizer="smac",
@@ -90,6 +91,14 @@ def create_parser() -> argparse.ArgumentParser:
         "--disable-jsonl-history",
         action="store_true",
         help="Disable writing JSONL history (overrides config to False)",
+    )
+
+    parser.add_argument(
+        "--no-evaluate-incumbent",
+        action="store_true",
+        help="Skip retraining/evaluating the incumbent on held-out test data "
+        "after optimization finishes (no predictions.npy / incumbent.json "
+        "produced). Default: incumbent evaluation is enabled.",
     )
 
     parser.add_argument("--num-workers", type=int)
@@ -174,8 +183,16 @@ def merge_config(
         if cli_dict.get("disable_jsonl_history"):
             cfg["enable_jsonl_history"] = False
 
+        if cli_dict.get("no_evaluate_incumbent"):
+            cfg["evaluate_incumbent"] = False
+
         for k, v in cli_dict.items():
-            if k in ("config", "enable_jsonl_history", "disable_jsonl_history"):
+            if k in (
+                "config",
+                "enable_jsonl_history",
+                "disable_jsonl_history",
+                "no_evaluate_incumbent",
+            ):
                 continue
             if v is None:
                 continue

@@ -83,6 +83,9 @@ class Optimizer(ABC):
         # Live JSONLines logging
         self.enable_jsonl_history: bool = runtime_config["enable_jsonl_history"]
         self.history_jsonl_path = self.output_path / "history.log.jsonl"
+        self.evaluate_incumbent_enabled: bool = runtime_config.get(
+            "evaluate_incumbent", True
+        )
 
         self.highest_budget_seen: float = 0.0
         self.best_val_error: float = float("inf")
@@ -147,11 +150,17 @@ class Optimizer(ABC):
         Common post-optimization logic for all optimizers:
 
         - Save incumbent to disk
-        - Evaluate on held-out test data
+        - Evaluate on held-out test data (unless disabled via
+          `evaluate_incumbent=False` / `--no-evaluate-incumbent`)
         - Persist history + plots
         """
 
-        if incumbent:
+        if incumbent and not self.evaluate_incumbent_enabled:
+            self.logger.info(
+                f"[{self.__class__.__name__}] Skipping incumbent evaluation "
+                "(--no-evaluate-incumbent set)."
+            )
+        elif incumbent:
             # Held-out Test Evaluation
             if isinstance(incumbent, Configuration):
                 result: EvaluationResult = self.evaluate_incumbent(incumbent)
