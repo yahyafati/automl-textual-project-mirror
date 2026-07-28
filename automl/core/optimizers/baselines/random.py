@@ -50,8 +50,6 @@ class RandomSearch(Optimizer):
 
         try:
             for i in range(n_trials):
-                self.trial_no = i + 1
-
                 # Uniform random configuration from ConfigSpace
                 config: Configuration = self.space.sample_configuration()
 
