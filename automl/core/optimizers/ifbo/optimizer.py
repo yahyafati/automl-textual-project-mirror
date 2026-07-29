@@ -300,7 +300,7 @@ class IfboOptimizer(Optimizer):
         Polynomial Decay:
         e_t = e_min + (e_0 - e_min) * (1 - t/T)^p
         """
-        eps_min = 0.1
+        eps_min = 0.05
         p = 2.0
         frac = completed_trials / self.total_steps
         return eps_min + (self.initial_epsilon - eps_min) * (1 - frac) ** p
@@ -416,14 +416,22 @@ class IfboOptimizer(Optimizer):
         """
         Dynamic epsilon-greedy MFPI-random acquisition:
 
-        - If the candidate list is empty, sample a new candidate
-        - Otherwise sample a new candidate with probability epsilon
-        - With probability 1 - epsilon, sample among pending existing candidates
-          using PI(T_rand) as the sampling weights
-        - Sample a random future horizon h_rand in {1, ..., b_max}
-        - Sample a random target T_rand above current best accuracy
-        - For each pending existing candidate, query FT-PFN at time
-          t' = (steps_done + h_rand)/b_max
+        - If the candidate list is empty, sample a new candidate.
+        - Otherwise, with probability epsilon, force-sample a brand new
+          candidate unconditionally (guaranteed exploration floor,
+          independent of the surrogate).
+        - Otherwise (probability 1 - epsilon), score the pending existing
+          candidates *and* one freshly-sampled, not-yet-pooled candidate
+          together using PI(T_rand): the fresh candidate only joins
+          `self.candidates` if it wins this round's competition, otherwise
+          it is discarded. This lets exploitation rounds still surface
+          genuinely new regions of the space (per the surrogate's belief)
+          without unconditionally growing the pool - and therefore the
+          FT-PFN context size - on every round the way pure epsilon-driven
+          injection would.
+        - Sample a random future horizon h_rand in {1, ..., b_max}.
+        - Sample a random target T_rand above current best accuracy.
+        - For each contender, query FT-PFN at time t' = (steps_done + h_rand)/b_max.
         - Then advance the selected candidate by h_rand freeze-thaw steps.
 
         `exclude` holds `uid`s of candidates already picked earlier in the
@@ -454,16 +462,19 @@ class IfboOptimizer(Optimizer):
             for c in self.candidates
             if c.steps_done < self.b_max and c.uid not in excluded_uids
         ]
-        if not pending:
-            self.logger.debug("No pending candidates, sampling a new one.")
-            candidate = self._sample_new_candidate()
-            self.candidates.append(candidate)
-            return candidate
+
+        # Propose one fresh, not-yet-pooled candidate as an extra contender.
+        # It's only appended to self.candidates below if it wins the
+        # competition - otherwise its uid is simply never referenced again.
+        fresh = self._sample_new_candidate()
+        contenders: list[_IfBOCandidate] = pending + [fresh]
 
         # For baselines
         if self.ifbo_use_random_selection:
-            candidate = self._rng.choice(pending)
-            return candidate
+            selected = self._rng.choice(contenders)
+            if selected is fresh:
+                self.candidates.append(fresh)
+            return selected
 
         f_best = self._best_so_far_accuracy()
         h_rand = self._rng.randint(1, self.b_max)
@@ -471,7 +482,7 @@ class IfboOptimizer(Optimizer):
         T_rand = f_best + tau_rand * (1.0 - f_best)
 
         query: list[Curve] = []
-        for c in pending:
+        for c in contenders:
             t_query = min(c.steps_done + h_rand, self.b_max) / self.b_max
             query.append(
                 Curve(
@@ -494,13 +505,17 @@ class IfboOptimizer(Optimizer):
 
         if self.greedy_selection:
             idx = torch.argmax(pi_scores)
-            selected = pending[idx]
+            selected = contenders[idx]
         else:
             weights = torch.softmax(pi_scores, dim=0).tolist()
-            selected = self._rng.choices(pending, weights=weights, k=1)[0]
+            selected = self._rng.choices(contenders, weights=weights, k=1)[0]
 
         # Free inference-related variables right away
         del query, predictions, T_tensor
+
+        if selected is fresh:
+            self.logger.debug("Fresh candidate won the round, adding to pool.")
+            self.candidates.append(fresh)
 
         return selected
 
