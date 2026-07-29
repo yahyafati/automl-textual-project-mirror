@@ -85,6 +85,20 @@ class IfboOptimizer(Optimizer):
         )
         self._thaw_step: int = runtime_config.get("ifbo_thaw_step", 1)
 
+        # Minimum number of freeze-thaw observations the current best-so-far
+        # candidate must have before it's eligible to be excluded from the
+        # acquisition competition (see `_select_next_candidate`) - guards
+        # against freezing it out on the strength of a single, possibly
+        # noisy, observation.
+        self.incumbent_exclusion_min_observations: int = int(
+            runtime_config.get("ifbo_incumbent_exclusion_min_observations", 2)
+        )
+        if self.incumbent_exclusion_min_observations < 1:
+            raise ValueError(
+                "[IfboOptimizer] ifbo_incumbent_exclusion_min_observations "
+                f"must be >= 1, got {self.incumbent_exclusion_min_observations}."
+            )
+
         if self.incumbent_ensemble_top_k < 1:
             raise ValueError(
                 "[IfboOptimizer] ifbo_incumbent_ensemble_top_k must be >= 1, "
@@ -111,7 +125,8 @@ class IfboOptimizer(Optimizer):
             "[IfboOptimizer] Initialized with dynamic candidates, budgets in [%d, %d], "
             "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f, "
             "ifbo_use_random_selection=%s, greedy_selection=%s, "
-            "incumbent_ensemble_top_k=%d, incumbent_ensemble_accuracy_threshold=%.4f",
+            "incumbent_ensemble_top_k=%d, incumbent_ensemble_accuracy_threshold=%.4f, "
+            "incumbent_exclusion_min_observations=%d",
             self.min_budget,
             self.max_budget,
             self.b_max,
@@ -122,6 +137,7 @@ class IfboOptimizer(Optimizer):
             self.greedy_selection,
             self.incumbent_ensemble_top_k,
             self.incumbent_ensemble_accuracy_threshold,
+            self.incumbent_exclusion_min_observations,
         )
 
         # Load FT-PFN surrogate model
@@ -429,6 +445,10 @@ class IfboOptimizer(Optimizer):
           without unconditionally growing the pool - and therefore the
           FT-PFN context size - on every round the way pure epsilon-driven
           injection would.
+        - The current best-so-far candidate is dropped from this round's
+          pending pool once it has `>= ifbo_incumbent_exclusion_min_observations`
+          observations, so it stops monopolizing budget by repeatedly
+          re-winning PI(T_rand) against its own (barely-above-f_best) target.
         - Sample a random future horizon h_rand in {1, ..., b_max}.
         - Sample a random target T_rand above current best accuracy.
         - For each contender, query FT-PFN at time t' = (steps_done + h_rand)/b_max.
@@ -462,6 +482,27 @@ class IfboOptimizer(Optimizer):
             for c in self.candidates
             if c.steps_done < self.b_max and c.uid not in excluded_uids
         ]
+
+        # Once the current best-so-far candidate has been observed at least
+        # `incumbent_exclusion_min_observations` times, drop it from
+        # contention this round. Left unchecked, it tends to keep re-winning
+        # PI(T_rand) against its own already-confirmed best (T_rand sits
+        # just above f_best), sinking budget into re-thawing itself instead
+        # of exploring/advancing other candidates.
+        incumbent_candidate = self._select_incumbent_candidate()
+        if (
+            math.isfinite(self._candidate_best_accuracy(incumbent_candidate))
+            and len(incumbent_candidate.ys) >= self.incumbent_exclusion_min_observations
+        ):
+            before = len(pending)
+            pending = [c for c in pending if c.uid != incumbent_candidate.uid]
+            if len(pending) < before:
+                self.logger.debug(
+                    "Excluding current best-so-far candidate (uid=%d, "
+                    "observations=%d) from this round's competition.",
+                    incumbent_candidate.uid,
+                    len(incumbent_candidate.ys),
+                )
 
         # Propose one fresh, not-yet-pooled candidate as an extra contender.
         # It's only appended to self.candidates below if it wins the
