@@ -26,7 +26,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     evaluate_incumbent=True,
     max_num_rows=40_000,
     val_size=0.2,
-    optimizer="smac",
+    optimizer="ifbo",
     num_workers=2,
     num_parallel_trials=1,
     stochastic_epochs=False,
@@ -99,6 +99,12 @@ def create_parser() -> argparse.ArgumentParser:
         help="Skip retraining/evaluating the incumbent on held-out test data "
         "after optimization finishes (no predictions.npy / incumbent.json "
         "produced). Default: incumbent evaluation is enabled.",
+    )
+
+    parser.add_argument(
+        "--ifbo-use-random-selection",
+        action="store_true",
+        help="Use random selection for ifBO candidates.",
     )
 
     parser.add_argument("--num-workers", type=int)
