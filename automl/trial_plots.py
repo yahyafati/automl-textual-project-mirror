@@ -306,7 +306,9 @@ def plot_learning_curves(
     ax_val.set_title(f"{val_label} vs Epoch")
     if bounds.get("epoch"):
         ax_val.set_xlim(bounds["epoch"])
-    if val_bounds:
+    if val_key in ["val_loss", "val_accuracy"]:
+        ax_val.set_ylim(0, 1)
+    elif val_bounds:
         ax_val.set_ylim(val_bounds)
 
     if n <= max_labeled_trials:
