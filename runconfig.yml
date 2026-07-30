@@ -5,19 +5,19 @@ data_path: data
 
 seed: 67
 
-evaluation_budget: 100
+evaluation_budget: 30
 max_budget: 50
-min_budget: 5
+min_budget: 1
 n_trials: 100
 optimizer: ifbo
 
 # Wall-clock cap (seconds) on a single trial's training call, checked once
 # per epoch boundary. null = no cap.
-max_trial_time_seconds: null
+max_trial_time_seconds: 900
 
 approach: sequence-dl
 num_workers: 1 # TODO: I don't think this is being properly used
-num_parallel_trials: 2
+num_parallel_trials: 4
 max_num_rows: 100000
 val_size: 0.1
 
@@ -34,9 +34,11 @@ ifbo_incumbent_ensemble_accuracy_threshold: 0.05
 stochastic_epochs: false
 stochastic_epoch_fraction: 0.25
 
-ifbo_thaw_step: 3
+ifbo_thaw_step: 1
 
 # Minimum number of freeze-thaw observations the current best-so-far
 # candidate must have before it's excluded from the acquisition competition
 # in _select_next_candidate (prevents it from monopolizing trial budget).
-ifbo_incumbent_exclusion_min_observations: 2
+ifbo_incumbent_exclusion_min_observations: 5
+
+evaluate_incumbent: false
