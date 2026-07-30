@@ -20,6 +20,7 @@ from automl.core.registry import get_approach, register_all_approaches
 from automl.core.trainers.base_trainer import Trainer
 from automl.core.types import (
     DatasetSplit,
+    EpochResult,
     TrialResult,
     ApproachName,
     TrainResult,
@@ -403,7 +404,35 @@ class Optimizer(ABC):
         Returns
         -------
         val_error : float
-            1 - validation accuracy.
+            1 - best validation accuracy observed across the whole
+            (possibly checkpoint-resumed) training run so far.
+        """
+        val_error, _ = self._train_single_configuration_with_history(
+            config=config,
+            seed=seed,
+            budget=budget,
+            device=device,
+            num_workers=num_workers,
+        )
+        return val_error
+
+    def _train_single_configuration_with_history(
+        self,
+        config: Configuration,
+        seed: int,
+        budget: float,
+        device: Optional[torch.device] = None,
+        num_workers: Optional[int] = None,
+    ) -> tuple[float, list[EpochResult]]:
+        """
+        Same as `train_single_configuration`, but also returns the
+        per-epoch training history (`TrainResult["history"]`) for this
+        call, i.e. every epoch actually trained (including ones replayed
+        from a resumed checkpoint before this call's new epochs). Callers
+        that need the raw, non-aggregated per-epoch validation accuracy
+        (e.g. ifBO's freeze-thaw curve, which must not conflate "value at
+        epoch e" with "best value seen up to epoch e") should use this
+        instead of reading `val_error` alone.
         """
         from automl.core.utils import timer
 
@@ -421,6 +450,7 @@ class Optimizer(ABC):
         max_num_rows = int(self.runtime_config["max_num_rows"])
 
         val_error = float("nan")
+        epoch_history: list[EpochResult] = []
         try:
             with self._state_lock:
                 self.trial_no += 1
@@ -519,6 +549,7 @@ class Optimizer(ABC):
 
             execution_time = t.execution_time
             val_error = 1.0 - result["val_accuracy"]
+            epoch_history = result["history"]
 
             with self._state_lock:
                 # TODO: Maybe we don't need this
@@ -570,8 +601,9 @@ class Optimizer(ABC):
         except Exception as err:
             self.logger.error(err, exc_info=True)
             val_error = float("nan")
+            epoch_history = []
 
-        return val_error
+        return val_error, epoch_history
 
     def evaluate_incumbent(
         self,

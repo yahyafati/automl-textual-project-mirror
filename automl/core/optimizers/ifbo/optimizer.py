@@ -362,12 +362,26 @@ class IfboOptimizer(Optimizer):
         Thaw `cand` for one or more freeze-thaw steps:
         - Increase its step counter
         - Train for the corresponding epoch budget
-        - Record normalized time t and performance y (accuracy) for FT-PFN
+        - Record one (t, y) observation *per epoch actually trained* in
+          this call, using that epoch's own validation accuracy - not
+          just one point for the whole call using the best accuracy seen
+          across the run. `TorchTrainer` already computes a per-epoch
+          accuracy for every epoch it trains
+          (`result["history"]`/`EpochResult.val_accuracy`); collapsing
+          that into a single running-max value would (a) throw away real
+          curve density whenever this call spans more than one epoch,
+          and (b) feed FT-PFN an artificially non-decreasing curve that
+          hides genuine degradation (e.g. overfitting) between epochs,
+          which is exactly the kind of "breaking point" curve shape the
+          surrogate is meant to reason about (see docs/IFBO_METHOD.md).
 
         `device`/`num_workers` are forwarded to `train_single_configuration`
         so a parallel batch can run several `_step` calls concurrently,
         each pinned to its own device (see `_perform_ifbo`).
         """
+        prev_budget = (
+            self._step_to_budget(cand.steps_done) if cand.steps_done > 0 else 0
+        )
         cand.steps_done = min(cand.steps_done + self._thaw_step, self.b_max)
         budget = self._step_to_budget(cand.steps_done)
 
@@ -377,25 +391,40 @@ class IfboOptimizer(Optimizer):
         with self._state_lock:
             seed = self._rng.randint(1, 2**31 - 1)
 
-        # train_single_configuration returns val_error = 1 - val_accuracy
-        val_error = self.train_single_configuration(
+        val_error, epoch_history = self._train_single_configuration_with_history(
             config=cand.config,
             seed=seed,
             budget=float(budget),
             device=device,
             num_workers=num_workers,
         )
-        # In case of failure val_error may be NaN
-        if math.isnan(val_error):
-            y = float("nan")
-        else:
-            y = 1.0 - float(val_error)  # convert to accuracy in [0,1]
 
-        # Normalized time t in [0,1], as in the synthetic ifbo_impl: step / b_max
-        t = cand.steps_done / self.b_max
+        # Epochs newly trained this call, restricted to epoch >= min_budget:
+        # epochs below that floor only exist because the very first call
+        # trains straight through to min_budget in one shot, and they don't
+        # correspond to any step on the {1, ..., b_max} grid `t` is defined
+        # over (min_budget IS step 1).
+        new_epochs = [
+            e
+            for e in epoch_history
+            if e["epoch"] > prev_budget and e["epoch"] >= self.min_budget
+        ]
 
-        cand.ts.append(t)
-        cand.ys.append(y)
+        if not new_epochs:
+            # Training failed outright (no history) or this call made no
+            # progress past the fidelity floor - fall back to a single
+            # observation at this call's target step, as before.
+            y = float("nan") if math.isnan(val_error) else 1.0 - float(val_error)
+            cand.ts.append(cand.steps_done / self.b_max)
+            cand.ys.append(y)
+            return
+
+        for e in new_epochs:
+            step = e["epoch"] - self.min_budget + 1
+            t = step / self.b_max  # normalized time in [0, 1]
+            y = e["val_accuracy"]
+            cand.ts.append(t)
+            cand.ys.append(float(y) if y is not None else float("nan"))
 
     def _step_on_device(
         self,
@@ -483,25 +512,32 @@ class IfboOptimizer(Optimizer):
             if c.steps_done < self.b_max and c.uid not in excluded_uids
         ]
 
-        # Once the current best-so-far candidate has been observed at least
+        # Once the current best-so-far candidate has been thawed at least
         # `incumbent_exclusion_min_observations` times, drop it from
         # contention this round. Left unchecked, it tends to keep re-winning
         # PI(T_rand) against its own already-confirmed best (T_rand sits
         # just above f_best), sinking budget into re-thawing itself instead
         # of exploring/advancing other candidates.
+        #
+        # Gated on `steps_done` (grid position / number of thaw calls),
+        # not `len(ys)`: since `_step` now records one curve point per
+        # epoch actually trained rather than one point per call, `len(ys)`
+        # can jump by more than one on a single thaw (e.g. min_budget > 1
+        # or ifbo_thaw_step > 1) and would trip this gate prematurely.
         incumbent_candidate = self._select_incumbent_candidate()
         if (
             math.isfinite(self._candidate_best_accuracy(incumbent_candidate))
-            and len(incumbent_candidate.ys) >= self.incumbent_exclusion_min_observations
+            and incumbent_candidate.steps_done
+            >= self.incumbent_exclusion_min_observations
         ):
             before = len(pending)
             pending = [c for c in pending if c.uid != incumbent_candidate.uid]
             if len(pending) < before:
                 self.logger.debug(
                     "Excluding current best-so-far candidate (uid=%d, "
-                    "observations=%d) from this round's competition.",
+                    "steps_done=%d) from this round's competition.",
                     incumbent_candidate.uid,
-                    len(incumbent_candidate.ys),
+                    incumbent_candidate.steps_done,
                 )
 
         # Propose one fresh, not-yet-pooled candidate as an extra contender.

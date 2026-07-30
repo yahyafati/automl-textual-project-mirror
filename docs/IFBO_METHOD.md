@@ -212,15 +212,44 @@ step_to_budget(step) = min_budget + step − 1        # step=1 → min_budget, s
 increments a candidate's `steps_done` by (typically) the acquisition function's chosen
 horizon, trains it for `step_to_budget(steps_done)` **total** epochs — i.e. the
 approach's trainer resumes from its last checkpoint and trains up to this new epoch
-count, not from scratch — and records one new observation:
+count, not from scratch — and records **one observation per epoch actually trained**
+in that call (not just one observation for the whole call):
 
 ```
-t = steps_done / b_max      # normalized time in [0, 1], matching the paper's convention
-y = 1 − val_error            # accuracy in [0, 1]
+step = epoch − min_budget + 1   # epoch is the trainer's own 1-indexed epoch count
+t = step / b_max                 # normalized time in [0, 1], matching the paper's convention
+y = val_accuracy                 # this epoch's own accuracy, not the run's best-so-far
 ```
 
-appended to `cand.ts` / `cand.ys`. This is the "thaw" operation: pausing every other
-candidate ("frozen") and spending the step budget entirely on the selected one.
+for every epoch trained since the candidate's previous `_step()` call, each appended to
+`cand.ts` / `cand.ys` (`optimizer.py:_step`). Two things are deliberate here and easy to
+get wrong:
+
+- **One point per epoch, not per call.** `TorchTrainer` already computes a validation
+  accuracy for every epoch it trains (`TrainResult["history"]`); when a single `_step()`
+  call spans more than one epoch (`ifbo_thaw_step > 1`, or the very first call training
+  straight through to `min_budget`), all of those epochs' accuracies become separate
+  curve observations instead of being collapsed into one.
+- **Raw per-epoch accuracy, not running-best.** `Approach.train()`'s own return value
+  (`val_accuracy`) is `TorchTrainer.best_val_acc` — a running max carried across
+  checkpoint resumes, used elsewhere for "should I save this as the best model
+  checkpoint" bookkeeping. Feeding *that* to FT-PFN as `y` would silently force every
+  candidate's curve to be non-decreasing, hiding genuine degradation between epochs
+  (e.g. overfitting) — exactly the kind of "breaking point" curve shape §1 says FT-PFN's
+  synthetic pretraining prior is built to reason about. `_step()` instead reads each
+  epoch's own `val_accuracy` out of the per-epoch history.
+  Epochs below `min_budget` (only relevant on a candidate's first `_step()` call) are
+  dropped rather than turned into observations, since they don't correspond to any
+  step on the `{1, …, b_max}` grid `t` is defined over — `min_budget` *is* step 1.
+
+This is the "thaw" operation: pausing every other candidate ("frozen") and spending the
+step budget entirely on the selected one.
+
+Note that `steps_done` (grid position) and `len(cand.ys)` (curve point count) are no
+longer the same quantity once a call can span multiple epochs — code that means "how
+far along the fidelity grid is this candidate" (e.g. the incumbent-exclusion gate in
+`_select_next_candidate`) uses `steps_done`; only code that wants literal curve density
+should use `len(cand.ys)`.
 
 ---
 
