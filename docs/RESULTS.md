@@ -1,7 +1,7 @@
 # Results: ifBO vs. Random / SMAC(BO+HB) / ifBO-Random
 
 Numbers pulled directly from `results/<dataset>/[<optimizer>]<runtime_id>/history.log.jsonl`
-(and the curated copies in `final-results/`) on 2026-07-28. "Best val. acc." is
+(and the curated copies in `../sample-results/`) on 2026-07-28. "Best val. acc." is
 `1 - min(val_error)` over all logged trial/freeze-thaw steps in a run — the best
 validation-split accuracy the search *found*, not a held-out test score. No `yelp`
 runs exist yet (`yelp` is the held-out exam set); all numbers below are Phase I
