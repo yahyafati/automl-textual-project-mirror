@@ -688,9 +688,19 @@ class IfboOptimizer(Optimizer):
                 used_steps += len(batch)
 
                 # --- MEMORY CLEANUP: once per round, not once per trial ---
+                # This runs on the main thread, which never calls
+                # `torch.cuda.set_device(...)`, so its "current device" stays
+                # whatever it defaults to (cuda:0) - a plain, unscoped
+                # `torch.cuda.empty_cache()` here would only ever release
+                # cuda:0's cache, leaving every other device's allocator to
+                # accumulate reserved/fragmented memory for the whole run.
+                # Explicitly loop over every device trials were dispatched to.
                 gc.collect()
                 if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    for d in self.devices:
+                        if d.type == "cuda":
+                            with torch.cuda.device(d):
+                                torch.cuda.empty_cache()
                 if torch.mps.is_available():
                     torch.mps.empty_cache()
                 # ------------------------------------------------------------
