@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import logging
+import multiprocessing as mp
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -166,6 +169,18 @@ def parse_args() -> argparse.Namespace:
         "or the value recorded in manifest.json when resuming)",
     )
     parser.add_argument(
+        "--devices",
+        type=str,
+        default=None,
+        help="Comma-separated devices to train incumbents on in parallel, "
+        "one process per device (e.g. 'cuda:0,cuda:1,cuda:2,cuda:3'), or "
+        "'auto' to use every visible CUDA device. When set, incumbents are "
+        "trained in separate processes pinned one-per-device; whenever a "
+        "device finishes a config it immediately picks up the next pending "
+        "one (default: unset, or the value recorded in manifest.json when "
+        "resuming - i.e. sequential training on --device).",
+    )
+    parser.add_argument(
         "--stochastic-epochs",
         action="store_true",
         default=None,
@@ -277,6 +292,85 @@ def resolve_device(device_arg: str) -> torch.device:
     if device_arg == "auto":
         return get_device(verbose=True)
     return torch.device(device_arg)
+
+
+def resolve_devices(devices_arg: Optional[str]) -> Optional[list[str]]:
+    """Parses --devices into a list of device strings, or None if unset
+    (meaning: sequential single-device training). 'auto' expands to every
+    CUDA device visible to this process."""
+    if devices_arg is None:
+        return None
+    if devices_arg == "auto":
+        num_gpus = torch.cuda.device_count()
+        if num_gpus == 0:
+            raise ValueError(
+                "--devices auto requested but no CUDA devices are visible."
+            )
+        return [f"cuda:{i}" for i in range(num_gpus)]
+    devices = [d.strip() for d in devices_arg.split(",") if d.strip()]
+    if not devices:
+        raise ValueError(f"Could not parse any devices from --devices={devices_arg!r}")
+    return devices
+
+
+# Set once per worker process by _init_worker (spawn context: each worker
+# is a fresh interpreter, so this is process-local, not shared).
+_WORKER_DEVICE: Optional[torch.device] = None
+
+
+def _init_worker(device_queue: "mp.Queue", log_path: Path) -> None:
+    """Pool initializer: runs once per worker process. Pins this worker to
+    exactly one device (popped from a queue pre-filled with one entry per
+    device, so each of the N worker processes claims a distinct one), and
+    re-does the setup that main() normally does before training starts,
+    since a spawned process starts from a fresh interpreter."""
+    global _WORKER_DEVICE
+    device_str = device_queue.get()
+    _WORKER_DEVICE = torch.device(device_str)
+    setup_logging(output_path=log_path, level=logging.DEBUG)
+    registry.register_all_approaches()
+    logger.info(f"Worker process {os.getpid()} pinned to device {_WORKER_DEVICE}")
+
+
+def _train_incumbent_job(job: dict[str, Any]) -> dict[str, Any]:
+    """Runs in a worker process pinned to _WORKER_DEVICE by _init_worker.
+    Trains and evaluates exactly one incumbent config, returning enough
+    information for the main process (the sole manifest writer) to record
+    the result. Never raises: errors/interrupts are reported in the return
+    value so the main process can decide how to react."""
+    idx = job["idx"]
+    try:
+        dataset = get_dataset_class(job["dataset_name"])(job["data_path"])
+        evaluation_result = train_and_evaluate_config(
+            config=job["config"],
+            epochs=job["epochs"],
+            dataset=dataset,
+            seed=job["seed"],
+            device=_WORKER_DEVICE,
+            num_workers=job["num_workers"],
+            output_dir=job["output_dir"],
+            predictions_filename=job["predictions_filename"],
+            checkpoint_dir=job["checkpoint_dir"],
+            data_fraction=job["data_fraction"],
+            resume_checkpoint=job["resume_checkpoint"],
+            stochastic_epochs=job["stochastic_epochs"],
+            stochastic_epoch_fraction=job["stochastic_epoch_fraction"],
+        )
+        return {
+            "idx": idx,
+            "ok": True,
+            "device": str(_WORKER_DEVICE),
+            "train_val_accuracy": evaluation_result["train_result"]["val_accuracy"],
+            "history": evaluation_result["train_result"]["history"],
+            "y_pred": evaluation_result["prediction_result"]["y_pred"],
+            "y_true": evaluation_result["prediction_result"]["y_true"],
+        }
+    except KeyboardInterrupt:
+        logger.warning(f"Incumbent {idx} interrupted on {_WORKER_DEVICE}.")
+        return {"idx": idx, "ok": False, "interrupted": True}
+    except Exception as exc:
+        logger.exception(f"Incumbent {idx} failed on {_WORKER_DEVICE}")
+        return {"idx": idx, "ok": False, "interrupted": False, "error": str(exc)}
 
 
 def save_test_predictions(
@@ -546,7 +640,11 @@ def main():
         args.data_fraction, old_manifest, "data_fraction", DEFAULT_DATA_FRACTION
     )
     device_arg: str = _pick(args.device, old_manifest, "device", DEFAULT_DEVICE)
-    device = resolve_device(device_arg)
+    devices_arg: Optional[str] = _pick(args.devices, old_manifest, "devices", None)
+    devices = resolve_devices(devices_arg)
+    # Only resolve/log a single device when running sequentially; in
+    # parallel mode each worker process resolves its own pinned device.
+    device = resolve_device(device_arg) if devices is None else None
     stochastic_epochs: bool = _pick(
         args.stochastic_epochs,
         old_manifest,
@@ -610,9 +708,9 @@ def main():
     )
 
     has_multiple_incumbents = len(top_trials) > 1
-    saved_incumbents: list[SavedIncumbent] = []
-    incumbent_predictions: list[np.ndarray] = []
-    incumbent_records: list[dict[str, Any]] = []
+    saved_incumbents: list[Optional[SavedIncumbent]] = [None] * len(top_trials)
+    incumbent_predictions: list[Optional[np.ndarray]] = [None] * len(top_trials)
+    incumbent_records: list[Optional[dict[str, Any]]] = [None] * len(top_trials)
 
     manifest: dict[str, Any] = {
         "history_path": history_path_for_record,
@@ -624,6 +722,7 @@ def main():
         "num_workers": num_workers,
         "data_fraction": data_fraction,
         "device": device_arg,
+        "devices": devices_arg,
         "stochastic_epochs": stochastic_epochs,
         "stochastic_epoch_fraction": stochastic_epoch_fraction,
         "has_multiple_incumbents": has_multiple_incumbents,
@@ -635,7 +734,42 @@ def main():
     # make sure a manifest still exists on disk recording this run's args.
     save_manifest(manifest, output_dir)
 
+    def _apply_result(
+        idx: int, record: dict[str, Any], evaluation_result: EvaluationResult
+    ) -> None:
+        """Stores one incumbent's completed outputs at position idx and
+        persists the manifest, mirroring the original per-iteration
+        checkpointing so an interruption only costs whatever was still
+        in-flight. Called for both cache hits and freshly-trained
+        incumbents, from either the sequential or parallel dispatch path."""
+        nonlocal heldout_labels
+        labels = evaluation_result["prediction_result"]["y_true"]
+        if heldout_labels is None:
+            heldout_labels = labels
+            np.save(heldout_labels_path, heldout_labels)
+            logger.info(f"Saved held-out labels to {heldout_labels_path}")
+        elif not np.array_equal(heldout_labels, labels):
+            raise ValueError(
+                "Cannot compute ensemble accuracy because incumbent "
+                "evaluations used different held-out labels."
+            )
+
+        incumbent_records[idx] = record
+        if has_multiple_incumbents:
+            incumbent_predictions[idx] = evaluation_result["prediction_result"][
+                "y_pred"
+            ]
+        saved_incumbents[idx] = SavedIncumbent(
+            incumbent=record["config"], evaluation_result=evaluation_result
+        )
+
+        # Persist progress after every incumbent, so an interruption only
+        # costs whatever was still in-flight, not everything completed so
+        # far.
+        save_manifest(manifest, output_dir)
+
     try:
+        pending_jobs: list[dict[str, Any]] = []
         for idx, trial in enumerate(top_trials):
             config = trial["config"]
             model_type = config["model_type"]
@@ -655,6 +789,7 @@ def main():
                 old_incumbents = old_manifest.get("incumbents", [])
                 if (
                     idx < len(old_incumbents)
+                    and isinstance(old_incumbents[idx], dict)
                     and old_incumbents[idx].get("config") == config
                 ):
                     prior_record = old_incumbents[idx]
@@ -705,6 +840,7 @@ def main():
                 )
                 record = dict(prior_record)
                 record["predictions_file"] = predictions_filename
+                _apply_result(idx, record, evaluation_result)
             else:
                 # SklearnTrainer.train() always refits from scratch
                 # regardless of load_path (see sklearn_trainer.py), and
@@ -714,48 +850,61 @@ def main():
                 # unfitted. Only pass a resume checkpoint to approaches
                 # that can actually use one.
                 can_resume_training = model_type != "tfidf-linear"
-                evaluation_result = train_and_evaluate_config(
-                    config=config,
-                    epochs=epochs,
-                    dataset=dataset,
-                    seed=seed,
-                    device=device,
-                    num_workers=num_workers,
-                    output_dir=output_dir,
-                    predictions_filename=predictions_filename,
-                    checkpoint_dir=incumbent_checkpoint_dir,
-                    data_fraction=data_fraction,
-                    resume_checkpoint=(
-                        trainer_checkpoint
-                        if can_resume_training and trainer_checkpoint.exists()
-                        else None
-                    ),
-                    stochastic_epochs=stochastic_epochs,
-                    stochastic_epoch_fraction=stochastic_epoch_fraction,
+                pending_jobs.append(
+                    {
+                        "idx": idx,
+                        "trial": trial,
+                        "config": config,
+                        "model_type": model_type,
+                        "dataset_name": dataset_name,
+                        "data_path": data_path,
+                        "epochs": epochs,
+                        "seed": seed,
+                        "num_workers": num_workers,
+                        "output_dir": output_dir,
+                        "predictions_filename": predictions_filename,
+                        "checkpoint_dir": incumbent_checkpoint_dir,
+                        "data_fraction": data_fraction,
+                        "resume_checkpoint": (
+                            trainer_checkpoint
+                            if can_resume_training and trainer_checkpoint.exists()
+                            else None
+                        ),
+                        "stochastic_epochs": stochastic_epochs,
+                        "stochastic_epoch_fraction": stochastic_epoch_fraction,
+                    }
                 )
 
-                labels = evaluation_result["prediction_result"]["y_true"]
-                if heldout_labels is None:
-                    heldout_labels = labels
-                    np.save(heldout_labels_path, heldout_labels)
-                    logger.info(f"Saved held-out labels to {heldout_labels_path}")
-                elif not np.array_equal(heldout_labels, labels):
-                    raise ValueError(
-                        "Cannot compute ensemble accuracy because incumbent "
-                        "evaluations used different held-out labels."
-                    )
-
+        if pending_jobs and devices is None:
+            # Sequential path (default): unchanged behavior, one config at
+            # a time on a single device.
+            for job in pending_jobs:
+                evaluation_result = train_and_evaluate_config(
+                    config=job["config"],
+                    epochs=job["epochs"],
+                    dataset=dataset,
+                    seed=job["seed"],
+                    device=device,
+                    num_workers=job["num_workers"],
+                    output_dir=job["output_dir"],
+                    predictions_filename=job["predictions_filename"],
+                    checkpoint_dir=job["checkpoint_dir"],
+                    data_fraction=job["data_fraction"],
+                    resume_checkpoint=job["resume_checkpoint"],
+                    stochastic_epochs=job["stochastic_epochs"],
+                    stochastic_epoch_fraction=job["stochastic_epoch_fraction"],
+                )
                 record = {
-                    "idx": idx,
-                    "config": config,
-                    "val_error": trial.get("val_error"),
-                    "trial_no": trial.get("trial_no"),
-                    "budget": trial.get("budget"),
-                    "model_type": model_type,
+                    "idx": job["idx"],
+                    "config": job["config"],
+                    "val_error": job["trial"].get("val_error"),
+                    "trial_no": job["trial"].get("trial_no"),
+                    "budget": job["trial"].get("budget"),
+                    "model_type": job["model_type"],
                     "checkpoint_dir": str(
-                        incumbent_checkpoint_dir.relative_to(output_dir)
+                        job["checkpoint_dir"].relative_to(output_dir)
                     ),
-                    "predictions_file": predictions_filename,
+                    "predictions_file": job["predictions_filename"],
                     "status": "completed",
                     "epochs_trained": epochs,
                     "train_val_accuracy": evaluation_result["train_result"][
@@ -763,21 +912,77 @@ def main():
                     ],
                     "history": evaluation_result["train_result"]["history"],
                 }
+                _apply_result(job["idx"], record, evaluation_result)
 
-            incumbent_records.append(record)
-            if has_multiple_incumbents:
-                incumbent_predictions.append(
-                    evaluation_result["prediction_result"]["y_pred"]
-                )
-
-            saved_incumbents.append(
-                SavedIncumbent(incumbent=config, evaluation_result=evaluation_result)
+        elif pending_jobs:
+            # Parallel path: one worker process pinned per device, pool
+            # reused across jobs so a device is handed the next pending
+            # config the instant it frees up (ProcessPoolExecutor feeds
+            # queued tasks to whichever worker becomes idle first).
+            num_pool_workers = min(len(devices), len(pending_jobs))
+            logger.info(
+                f"Training {len(pending_jobs)} pending incumbent(s) across "
+                f"{num_pool_workers} device(s): {devices[:num_pool_workers]}"
             )
+            mp_context = mp.get_context("spawn")
+            manager = mp_context.Manager()
+            device_queue = manager.Queue()
+            for d in devices[:num_pool_workers]:
+                device_queue.put(d)
 
-            # Persist progress after every incumbent, so an interruption
-            # only costs the in-flight incumbent, not everything completed
-            # so far.
-            save_manifest(manifest, output_dir)
+            executor = concurrent.futures.ProcessPoolExecutor(
+                max_workers=num_pool_workers,
+                mp_context=mp_context,
+                initializer=_init_worker,
+                initargs=(device_queue, log_path),
+            )
+            try:
+                futures = {
+                    executor.submit(_train_incumbent_job, job): job
+                    for job in pending_jobs
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    job = futures[future]
+                    idx = job["idx"]
+                    result = future.result()
+                    if not result["ok"]:
+                        if result.get("interrupted"):
+                            raise KeyboardInterrupt()
+                        raise RuntimeError(
+                            f"Incumbent {idx} (model_type={job['model_type']}) "
+                            f"failed in worker process: {result.get('error')}"
+                        )
+                    logger.info(f"Incumbent {idx} finished on {result['device']}")
+                    evaluation_result = EvaluationResult(
+                        train_result=TrainResult(
+                            val_accuracy=result["train_val_accuracy"],
+                            history=result["history"],
+                        ),
+                        prediction_result=PredictionResult(
+                            y_pred=result["y_pred"], y_true=result["y_true"]
+                        ),
+                    )
+                    record = {
+                        "idx": idx,
+                        "config": job["config"],
+                        "val_error": job["trial"].get("val_error"),
+                        "trial_no": job["trial"].get("trial_no"),
+                        "budget": job["trial"].get("budget"),
+                        "model_type": job["model_type"],
+                        "checkpoint_dir": str(
+                            job["checkpoint_dir"].relative_to(output_dir)
+                        ),
+                        "predictions_file": job["predictions_filename"],
+                        "status": "completed",
+                        "epochs_trained": epochs,
+                        "train_val_accuracy": result["train_val_accuracy"],
+                        "history": result["history"],
+                        "device": result["device"],
+                    }
+                    _apply_result(idx, record, evaluation_result)
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
+                manager.shutdown()
 
         ensemble_evaluation_result: Optional[TrainResult] = None
         if has_multiple_incumbents:
@@ -822,7 +1027,11 @@ def main():
             logger.info(f"Final held-out accuracy: {acc:.4f}")
 
     except KeyboardInterrupt:
-        completed = sum(1 for r in incumbent_records if r.get("status") == "completed")
+        completed = sum(
+            1
+            for r in incumbent_records
+            if r is not None and r.get("status") == "completed"
+        )
         logger.warning(
             f"Interrupted by user. {completed}/{len(top_trials)} incumbent(s) "
             f"finished and were saved under {output_dir}. Re-run with "
