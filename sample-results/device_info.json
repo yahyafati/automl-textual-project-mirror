@@ -1,0 +1,110 @@
+{
+  "timestamp_utc": "2026-07-30T07:30:19.583794+00:00",
+  "platform": {
+    "system": "Darwin",
+    "node_name": "Yahyas-MacBook-Pro.local",
+    "hostname": "Yahyas-MacBook-Pro.local",
+    "os_release": "25.5.0",
+    "os_version": "Darwin Kernel Version 25.5.0: Mon Apr 27 20:39:09 PDT 2026; root:xnu-12377.121.6~2/RELEASE_ARM64_T6020",
+    "machine": "arm64",
+    "architecture": "64bit",
+    "python_version": "3.11.14",
+    "python_implementation": "CPython",
+    "python_executable": "/Users/yahyahaji/Documents/Germany/UniFreiburg - MSc Informatik/Scripts/AutoML/final-exam-mine/automl-exam-ss26-text-auto-auto/.venv/bin/python",
+    "macos_version": "26.5.1",
+    "mac_model": "Mac14,5",
+    "apple_silicon": true
+  },
+  "cpu": {
+    "processor_raw": "arm",
+    "physical_cores": 12,
+    "logical_cores": 12,
+    "max_frequency_mhz": 3504,
+    "current_frequency_mhz": 3504,
+    "cpu_usage_percent": 14.3,
+    "brand": "Apple M2 Max",
+    "arch": "ARM_8",
+    "bits": 64,
+    "hz_advertised_ghz": null
+  },
+  "ram": {
+    "total_gb": 32.0,
+    "available_gb": 15.53,
+    "used_gb": 10.47,
+    "percent_used": 51.5,
+    "swap_total_gb": 7.0,
+    "swap_used_gb": 5.85
+  },
+  "disk": {
+    "home_partition_total_gb": 926.35,
+    "home_partition_free_gb": 125.55,
+    "home_partition_used_percent": 85.8
+  },
+  "gpu": {
+    "apple": [
+      {
+        "_name": "Apple M2 Max",
+        "spdisplays_mtlgpufamilysupport": "spdisplays_metal4",
+        "spdisplays_ndrvs": [
+          {
+            "_name": "Color LCD",
+            "_spdisplays_display-product-id": "a04e",
+            "_spdisplays_display-serial-number": "fd626d62",
+            "_spdisplays_display-vendor-id": "610",
+            "_spdisplays_display-week": "0",
+            "_spdisplays_display-year": "0",
+            "_spdisplays_displayID": "1",
+            "_spdisplays_pixels": "3024 x 1964",
+            "_spdisplays_resolution": "1512 x 982 @ 120.00Hz",
+            "spdisplays_ambient_brightness": "spdisplays_yes",
+            "spdisplays_connection_type": "spdisplays_internal",
+            "spdisplays_display_type": "spdisplays_built-in-liquid-retina-xdr",
+            "spdisplays_main": "spdisplays_yes",
+            "spdisplays_mirror": "spdisplays_off",
+            "spdisplays_online": "spdisplays_yes",
+            "spdisplays_pixelresolution": "spdisplays_3024x1964Retina"
+          },
+          {
+            "_name": "LG ULTRAGEAR",
+            "_spdisplays_display-product-id": "5c94",
+            "_spdisplays_display-serial-number": "81c06",
+            "_spdisplays_display-vendor-id": "1e6d",
+            "_spdisplays_display-week": "5",
+            "_spdisplays_display-year": "2025",
+            "_spdisplays_displayID": "3",
+            "_spdisplays_pixels": "2560 x 1440",
+            "_spdisplays_resolution": "2560 x 1440 @ 144.00Hz",
+            "spdisplays_mirror": "spdisplays_off",
+            "spdisplays_online": "spdisplays_yes",
+            "spdisplays_pixelresolution": "spdisplays_qhd",
+            "spdisplays_resolution": "2560 x 1440 @ 144.00Hz",
+            "spdisplays_rotation": "spdisplays_supported"
+          }
+        ],
+        "spdisplays_vendor": "sppci_vendor_Apple",
+        "sppci_bus": "spdisplays_builtin",
+        "sppci_cores": "30",
+        "sppci_device_type": "spdisplays_gpu",
+        "sppci_model": "Apple M2 Max"
+      }
+    ]
+  },
+  "torch": {
+    "available": true,
+    "version": "2.13.0",
+    "cuda_available": false,
+    "mps_built": true,
+    "mps_available": true,
+    "default_device": "mps"
+  },
+  "package_versions": {
+    "torch": "2.13.0",
+    "torchvision": "0.28.0",
+    "numpy": "1.26.4",
+    "scipy": "1.15.3",
+    "pandas": "2.3.3",
+    "transformers": "5.14.1",
+    "datasets": "5.0.0"
+  },
+  "relevant_env_vars": {}
+}
