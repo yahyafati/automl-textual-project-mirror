@@ -117,8 +117,8 @@ exploration always remains, even late in the run. Each iteration then branches:
   sampled uniformly from $\Lambda$, added to the pool with zero observations, and selected
   directly — bypassing the surrogate entirely.
 - **With probability $1-\epsilon(t)$** (an exploitation round): the *pending* pool (candidates
-  not yet at $b_\max$, minus any already claimed earlier in the same parallel batch — see
-  `docs/PARALLELISM.md`) is assembled, **plus one additional fresh configuration** sampled
+  not yet at $b_\max$, minus any already claimed earlier in the same parallel batch) is assembled, 
+  **plus one additional fresh configuration** sampled
   uniformly from $\Lambda$ for this round only. MFPI-random ($h_\text{rand}, T_\text{rand}$
   redrawn as in §5.1) then scores *every* contender — pending and fresh alike — against the
   FT-PFN context in a single batched query, and either takes the arg max
@@ -126,7 +126,8 @@ exploration always remains, even late in the run. Each iteration then branches:
   candidate is only appended to the persistent pool if it *wins* this round; otherwise it is
   discarded and never referenced again. A `ifbo_use_random_selection` flag swaps this scoring
   step for a uniform choice among the same contenders (pending + fresh), which is what backs
-  the "freeze-thaw random" baseline (see Results, below).
+  the "freeze-thaw random" baseline (see Results, below). 
+  **TODO: Add some experiment results for greedy and softmax methods**
 
 One more rule guards the exploitation branch: once the current best-so-far candidate has
 accumulated at least `ifbo_incumbent_exclusion_min_observations` (default $2$) freeze-thaw
