@@ -44,6 +44,10 @@ from typing import Any
 
 import yaml
 
+from automl.logger import get_logger, setup_logging
+
+logger = get_logger("")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Each entry overrides fields on top of --base-config for that arm of the
@@ -188,7 +192,17 @@ def main() -> None:
         help="Print the planned matrix only. Writes nothing to disk and "
         "launches nothing.",
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Log level for this runner's own logging (default: INFO). Does "
+        "not affect the log level each `automl` subprocess runs with - set "
+        "that via log_level in the config/--override instead.",
+    )
     args = parser.parse_args()
+
+    setup_logging(level=args.log_level)
 
     base_cfg = load_yaml(args.base_config)
     if args.output_path:
@@ -207,32 +221,37 @@ def main() -> None:
         batch_ts,
     )
 
-    print(
+    logger.info(
         f"Planned {len(plan)} run(s): {len(args.variants)} variant(s) x "
         f"{len(args.seeds)} seed(s), dataset={args.dataset!r}, "
         f"base_config={args.base_config}"
     )
     for entry in plan:
-        print(
+        logger.info(
             f"  {entry['variant']:<14} seed={entry['seed']:<4} -> {entry['output_path']}"
         )
 
     if args.dry_run:
-        print("\n--dry-run: nothing written or launched.")
+        logger.info("--dry-run: nothing written or launched.")
         return
 
     sweep_dir = output_root / args.dataset / "_sweeps" / batch_ts
     sweep_dir.mkdir(parents=True, exist_ok=True)
+    setup_logging(output_path=sweep_dir / "sweep.log", level=args.log_level)
     manifest_path = sweep_dir / "manifest.json"
     manifest: list[dict[str, Any]] = []
 
-    for entry in plan:
+    for i, entry in enumerate(plan, start=1):
         config_path = sweep_dir / f"{entry['runtime_id']}.yml"
         with config_path.open("w") as f:
             yaml.safe_dump(entry["config"], f, sort_keys=False)
 
         cmd = [args.python, "-m", "automl", "--config", str(config_path)]
-        print(f"\n=== {entry['variant']} seed={entry['seed']} ===\n$ {' '.join(cmd)}")
+        logger.info(
+            f"[{i}/{len(plan)}] Starting {entry['variant']} seed={entry['seed']} "
+            f"-> {entry['output_path']}"
+        )
+        logger.debug(f"Command: {' '.join(cmd)}")
 
         log_path = sweep_dir / f"{entry['runtime_id']}.stdout.log"
         record = {
@@ -258,17 +277,31 @@ def main() -> None:
         manifest.append(record)
         manifest_path.write_text(json.dumps(manifest, indent=2))
 
-        print(f"  -> {record['status']} in {duration / 60:.1f} min (log: {log_path})")
+        if proc.returncode == 0:
+            logger.info(
+                f"[{i}/{len(plan)}] {entry['variant']} seed={entry['seed']} "
+                f"finished ok in {duration / 60:.1f} min"
+            )
+        else:
+            logger.error(
+                f"[{i}/{len(plan)}] {entry['variant']} seed={entry['seed']} "
+                f"FAILED (returncode={proc.returncode}) after {duration / 60:.1f} min "
+                f"- see {log_path}"
+            )
 
         if proc.returncode != 0 and not args.continue_on_error:
-            print(
+            logger.warning(
                 "Stopping sweep on first failure (omit --stop-on-error to keep going)."
             )
             break
 
     n_ok = sum(1 for r in manifest if r["status"] == "ok")
     n_failed = sum(1 for r in manifest if r["status"] == "failed")
-    print(f"\nSweep complete: {n_ok} ok, {n_failed} failed. Manifest: {manifest_path}")
+    summary = f"Sweep complete: {n_ok} ok, {n_failed} failed. Manifest: {manifest_path}"
+    if n_failed:
+        logger.warning(summary)
+    else:
+        logger.info(summary)
 
 
 if __name__ == "__main__":
