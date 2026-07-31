@@ -97,35 +97,53 @@ space $\Lambda$ implicitly — at each iteration the acquisition is (conceptuall
 all $\lambda \in \Lambda$, which naturally lets brand-new, never-tried configurations compete against
 partially-trained ones for being selected next.
 
-This implementation instead maintains an **explicit, dynamically growing list** of candidates (starting empty) 
-and makes the "propose a new configuration vs. continue an existing one" decision via an **explicit decaying 
-$\epsilon$-greedy rule**:
+This implementation instead maintains an **explicit, dynamically growing list** of candidates
+(starting empty), and layers an **explicit decaying $\epsilon$-greedy exploration floor** on top
+of MFPI-random rather than substituting for it:
 
 $$
 \begin{align*}
 \epsilon(t) = \epsilon_{\min} + (\epsilon_0 - \epsilon_{\min}) \cdot \left(1 - \frac{t}{T}\right)^p.\\
-\text{where } \qquad \epsilon_{\min} = 0.1, \quad p = 2, \quad T = N
+\text{where } \qquad \epsilon_{\min} = 0.05, \quad p = 2, \quad T = N
 \end{align*}
 $$
 
-At each iteration, with probability $\epsilon(t)$ a brand-new configuration is sampled uniformly
-from $\Lambda$ and added to the pool with zero observations; 
-with probability $1 - \epsilon(t)$, MFPI-random selects among the existing *pending* candidates instead. 
-$\epsilon_0$ means the very first steps are pure exploration (every early step spawns a new candidate, since with
-an empty/small pool there's nothing meaningful yet for MFPI-random to discriminate
-between), decaying polynomially toward a floor of 0.1 so some exploration always
-remains, even late in the run.
+$\epsilon_0$ (`ifbo_initial_epsilon`, default $1.0$) means the very first steps are pure
+exploration — with an empty/small pool there's nothing meaningful yet for MFPI-random to
+discriminate between — decaying polynomially toward a floor of $0.05$ so some unconditional
+exploration always remains, even late in the run. Each iteration then branches:
 
-**This ε-greedy layer is a deliberate engineering addition, not part of the published
-ifBO method.** It exists because this implementation manages a discrete, growing
-candidate list rather than treating "propose a new λ" as one more option scored by the
-same acquisition function — a pragmatic simplification, since scoring an *unobserved*
-configuration's PI is degenerate (its curve is empty; there's nothing for FT-PFN to
-extrapolate from except the population-level prior baked into its weights, which the
-paper's own architecture does support via zero-context queries, but this implementation
-does not attempt to score new-candidate proposals against pending ones on the same
-acquisition scale — it decides "explore vs. exploit" first, structurally, then applies
-MFPI-random only within whichever branch is chosen).
+- **With probability $\epsilon(t)$** (the exploration floor): a brand-new configuration is
+  sampled uniformly from $\Lambda$, added to the pool with zero observations, and selected
+  directly — bypassing the surrogate entirely.
+- **With probability $1-\epsilon(t)$** (an exploitation round): the *pending* pool (candidates
+  not yet at $b_\max$, minus any already claimed earlier in the same parallel batch — see
+  `docs/PARALLELISM.md`) is assembled, **plus one additional fresh configuration** sampled
+  uniformly from $\Lambda$ for this round only. MFPI-random ($h_\text{rand}, T_\text{rand}$
+  redrawn as in §5.1) then scores *every* contender — pending and fresh alike — against the
+  FT-PFN context in a single batched query, and either takes the arg max
+  (`ifbo_greedy_candidate_selection`) or samples from a softmax over the PI scores. The fresh
+  candidate is only appended to the persistent pool if it *wins* this round; otherwise it is
+  discarded and never referenced again. A `ifbo_use_random_selection` flag swaps this scoring
+  step for a uniform choice among the same contenders (pending + fresh), which is what backs
+  the "freeze-thaw random" baseline (see Results, below).
+
+One more rule guards the exploitation branch: once the current best-so-far candidate has
+accumulated at least `ifbo_incumbent_exclusion_min_observations` (default $2$) freeze-thaw
+steps, it is temporarily dropped from the pending pool for that round. Left unchecked, it tends
+to keep re-winning $\mathrm{PI}(T_\text{rand})$ against its own already-confirmed best (since
+$T_\text{rand}$ sits just above $f_\text{best}$), sinking budget into repeatedly re-thawing
+itself instead of advancing or discovering other candidates.
+
+**This layer is a deliberate engineering addition, not part of the published ifBO method.** It
+exists because this implementation manages a discrete, growing candidate list rather than
+treating "propose a new $\lambda$" as one more option scored unconditionally by the same
+acquisition function every round — doing so on *every* round would grow the pool (and hence the
+FT-PFN context) without bound. Note, though, that a fresh candidate *is* scored against the
+surrogate on every exploitation round, competing on the same $\mathrm{PI}(T_\text{rand})$ scale
+as pending candidates for a chance to enter the pool; the surrogate is only fully bypassed on
+the explicit $\epsilon(t)$-floor rounds, which exist to guarantee a baseline injection rate of
+new configurations independent of what the surrogate currently believes.
 
 ## Methodology
 
