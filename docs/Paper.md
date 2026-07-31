@@ -146,6 +146,46 @@ as pending candidates for a chance to enter the pool; the surrogate is only full
 the explicit $\epsilon(t)$-floor rounds, which exist to guarantee a baseline injection rate of
 new configurations independent of what the surrogate currently believes.
 
+## Search space: the `sequence-dl` approach
+
+`sequence-dl` (`automl/core/approaches/sequence_dl.py`) is a BiLSTM-with-attention text
+classifier trained **from scratch** — no fine-tuning of a pretrained encoder — so its search
+space, defined in `build_config_space(fixed_model_type="sequence-dl")`
+(`automl/core/configspacehelper.py`), has to cover both generic optimization knobs and the
+architecture of a recurrent encoder built from nothing. $\Lambda_\text{sequence-dl}$ splits into
+two groups: hyperparameters shared with `transformer` (consumed generically by `TorchTrainer`
+and the data pipeline) and hyperparameters specific to the BiLSTM.
+
+**Shared hyperparameters** (both approaches sample these; ranges below are shared, defaults
+only sometimes differ per-approach):
+
+| Hyperparameter | Range | Default | Why |
+|---|---|---|---|
+| `dropout` | $[0.0, 0.5]$ | $0.2$ | Regularizes the classifier head / recurrent stack. Trained-from-scratch models overfit faster than fine-tuned ones on the same subsampled trial data, so the upper bound is pushed higher than would be sensible for `transformer`. |
+| `weight_decay` | $[10^{-6}, 10^{-2}]$, log | $10^{-4}$ | Standard L2 regularization; log-scaled since its effect is roughly multiplicative over orders of magnitude, not additive. |
+| `scheduler` | {`steplr`, `cosineannealinglr`, `exponentiallr`, `reducelronplateau`} | `cosineannealinglr` | Nothing in the training loop favors one LR schedule a priori across five very different datasets/sizes; exposed as a categorical so the optimizer (SMAC/ifBO) picks empirically rather than the schedule being hand-fixed. |
+| `batch_size` | $[32, 512]$, log | $64$ | Log-scaled because batch size trades off gradient noise against step count roughly log-linearly; the wide upper range matters more for `sequence-dl` since a from-scratch BiLSTM is cheap enough per-example to benefit from large batches, unlike a full transformer forward/backward. |
+| `max_seq_length` | $[64, 256]$, log | $128$ | Bounds both compute (LSTM cost is linear in sequence length after packing, see below) and how much of a long document is even visible to the model; log-scaled so short/long regimes get comparable sampling density. |
+| `warmup_ratio` | $[0.0, 0.2]$ | $0.1$ | Fraction of total steps spent on linear LR warmup before the main schedule kicks in — guards against the early, high-variance gradients typical of a randomly-initialized model (the embedding layer here is warm-started, but the LSTM and attention weights are not). |
+
+**`sequence-dl`-specific hyperparameters**:
+
+| Hyperparameter | Range | Default | Why |
+|---|---|---|---|
+| `hidden_dim` | $[32, 256]$, log | $128$ | LSTM hidden size per direction (the model is always bidirectional, so the pooled representation is $2\times$ this). Log-scaled since capacity/compute trade off multiplicatively; the range spans "cheap enough to try dozens of trials" to "enough capacity to fit the harder datasets (`yelp`, `amazon`)". |
+| `learning_rate` | $[10^{-4}, 10^{-2}]$, log | $10^{-3}$ | An order of magnitude higher than `transformer`'s range ($[10^{-5}, 5\times10^{-5}]$): everything downstream of the embedding layer is trained from scratch here, so it needs the larger step sizes typical of from-scratch supervised training rather than the small ones fine-tuning requires to avoid catastrophic forgetting. |
+| `optimizer` | {`adam`, `adamw`, `sgd`} | `adamw` | `sgd` is only a sane choice for a shallow from-scratch model like this (it would badly under-perform fine-tuning a transformer, so `transformer`'s search space excludes it); `adamw`/`adam` cover the common default choices. |
+| `seq_embed_dim` | $[32, 512]$, log | $128$ | Token embedding dimensionality. Independent of any pretrained encoder's native hidden size on purpose — see `seq_pretrained_model_name` below for how a mismatch against the source embedding matrix is handled. |
+| `seq_num_layers` | $[1, 3]$ | $1$ | Stacked LSTM layers. Kept shallow (max 3) because a from-scratch recurrent stack is harder to optimize as it deepens (vanishing gradients through both time and depth), and because HPO wall-clock is a hard constraint (§ Results) — depth is one of the more expensive ways to spend that budget for the accuracy it typically buys on these datasets. |
+| `seq_pretrained_model_name` | {`distilbert-base-uncased`, `bert-base-uncased`, `google/bert_uncased_L-4_H-512_A-8`, `microsoft/xtremedistil-l6-h256-uncased`} | `distilbert-base-uncased` | Does **not** select a fine-tuned backbone (`sequence-dl` never runs one) — it picks which pretrained model's **WordPiece tokenizer and token-embedding matrix** warm-start the from-scratch BiLSTM. The tokenizer and embedding source are always the same model, since the BiLSTM's vocab indices must line up with whichever embedding matrix seeds it. When the chosen model's native embedding dimensionality doesn't match the sampled `seq_embed_dim`, the embedding matrix is PCA/SVD-projected down (or randomly padded up) to fit — see `_pretrained_embedding_init` in `sequence_dl.py` — which preserves the directions of highest variance in the pretrained embedding space instead of discarding the warm start entirely. |
+
+Two omissions are deliberate, not oversights: `max_grad_norm` (gradient-clipping threshold) is
+fixed by CLI/config default rather than tuned — it's a stability safeguard, not an accuracy
+lever, so putting it in $\Lambda$ would spend trials on a dimension unlikely to move the metric.
+And unlike `transformer`, there is no `freeze_ratio`-equivalent knob: nothing is pretrained
+end-to-end here to freeze in the first place, only the embedding matrix, and that is warm-started
+rather than frozen.
+
 ## Methodology
 
 ![ifbo_diagram](./ifbo_diagram.svg)
