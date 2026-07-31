@@ -15,6 +15,7 @@ Usage:
     python plot_wallclock_vs_best_accuracy.py --inputs run1.jsonl run2.jsonl \
         --labels "SMAC" "ifBO" --time-unit minutes --show
 """
+
 import argparse
 import json
 import os
@@ -130,7 +131,11 @@ def plot_wallclock_vs_best_accuracy(
 
     for i, path in enumerate(inputs):
         color = cmap(i % 10)
-        label = labels[i] if labels else os.path.basename(os.path.dirname(path) or path) or path
+        label = (
+            labels[i]
+            if labels
+            else os.path.basename(os.path.dirname(path) or path) or path
+        )
 
         trials = load_trials(path)
         if not trials:
@@ -140,7 +145,9 @@ def plot_wallclock_vs_best_accuracy(
         raw_x, raw_y = raw_accuracies(trials)
         best_x, best_y = wallclock_vs_best_accuracy(trials)
         if not best_x:
-            print(f"Warning: no usable (timestamp, val_error) pairs in {path}, skipping.")
+            print(
+                f"Warning: no usable (timestamp, val_error) pairs in {path}, skipping."
+            )
             continue
 
         raw_x_scaled = [x / divisor for x in raw_x]

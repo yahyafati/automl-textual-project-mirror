@@ -52,7 +52,9 @@ class RandomSearch(Optimizer):
             for i in range(n_trials):
                 # Uniform random configuration from ConfigSpace
                 config: Configuration = self.space.sample_configuration()
-                self.logger.info(f"[RandomOptimizer] Trial {i + 1}: Sampled configuration: {config}")
+                self.logger.info(
+                    f"[RandomOptimizer] Trial {i + 1}: Sampled configuration: {config}"
+                )
 
                 # Here we simply use max_budget every time.
                 # If you want varying budgets, you could sample uniformly between min and max.
