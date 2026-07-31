@@ -1,43 +1,20 @@
 digraph BiLSTM {
-    rankdir=TB;
+    rankdir=LR;
     fontname="Helvetica";
     labelloc="t";
-    label=<<b>sequence-dl — BiLSTMClassifier</b><br/><font point-size="11">automl/core/approaches/sequence_dl.py — BiLSTMClassifier.__init__() / .forward()</font>>;
+    label=<<b>sequence-dl — BiLSTMClassifier</b><br/><font point-size="11">automl/core/approaches/sequence_dl.py</font>>;
     fontsize=20;
     bgcolor="white";
-    node [fontname="Helvetica", fontsize=13, style="filled,rounded", shape=box, penwidth=1.3, margin="0.25,0.15"];
+    node [fontname="Helvetica", fontsize=13, style="filled,rounded", shape=box, penwidth=1.3, margin="0.2,0.12"];
     edge [fontname="Helvetica", fontsize=11, color="#555555", penwidth=1.1];
 
-    input [label="input_ids\n(B, L), padding_idx = 0", shape=oval, fillcolor="#E8EAF6", color="#3F51B5"];
-    embed [label="nn.Embedding(vocab_size, embed_dim)\nweights warm-started from seq_pretrained_model_name's\ntoken matrix, PCA/SVD-projected to embed_dim\n(_pretrained_embedding_init); padding row kept zero", fillcolor="#E0F2F1", color="#00695C"];
-    pack [label="pack_padded_sequence\nlengths = (input_ids ≠ pad).sum(dim=1)\nskips padded positions in both directions", shape=note, fillcolor="#FFF9C4", color="#F9A825"];
-    lstm [label="nn.LSTM, bidirectional=True\nseq_num_layers stacked layer(s), hidden_dim units/direction\ninter-layer dropout if seq_num_layers > 1", fillcolor="#D1C4E9", color="#4527A0", shape=box3d];
-    unpack [label="pad_packed_sequence\nrestores (B, L, 2·hidden_dim), total_length = L", shape=note, fillcolor="#FFF9C4", color="#F9A825"];
+    input [label="input_ids", shape=oval, fillcolor="#E8EAF6", color="#3F51B5"];
+    embed [label="Embedding\n(pretrained warm-start)", fillcolor="#E0F2F1", color="#00695C"];
+    lstm [label="Bidirectional LSTM\n(seq_num_layers × hidden_dim)", fillcolor="#D1C4E9", color="#4527A0", shape=box3d];
+    attn [label="Attention pooling\n(masked, over all timesteps)", fillcolor="#FCE4EC", color="#C2185B"];
+    dropout [label="Dropout", fillcolor="#ECEFF1", color="#455A64"];
+    fc [label="Linear", fillcolor="#FFCCBC", color="#BF360C"];
+    output [label="logits", shape=oval, fillcolor="#E8EAF6", color="#3F51B5"];
 
-    subgraph cluster_attn {
-        label="Additive (Bahdanau-style) attention pooling\nover every timestep — not just the final hidden state";
-        style="rounded,filled";
-        fillcolor="#FCE4EC";
-        color="#C2185B";
-        fontsize=12;
-        score [label="attn_v(tanh(attn_w(outputs)))\nscores: (B, L)", fillcolor="#F8BBD0", color="#AD1457"];
-        mask [label="mask padded positions\n(scores → −∞ where t ≥ length)", fillcolor="#F8BBD0", color="#AD1457"];
-        softmax [label="softmax over L\n→ attention weights", fillcolor="#F8BBD0", color="#AD1457"];
-        context [label="weighted sum of outputs\n→ context vector (B, 2·hidden_dim)", fillcolor="#F8BBD0", color="#AD1457"];
-        score -> mask -> softmax -> context;
-    }
-
-    dropout [label="nn.Dropout(p = dropout)", fillcolor="#ECEFF1", color="#455A64"];
-    fc [label="nn.Linear(2·hidden_dim, num_classes)", fillcolor="#FFCCBC", color="#BF360C"];
-    output [label="logits\n(B, num_classes)", shape=oval, fillcolor="#E8EAF6", color="#3F51B5"];
-
-    input -> embed;
-    embed -> pack [label="  emb: (B, L, embed_dim)"];
-    pack -> lstm;
-    lstm -> unpack;
-    unpack -> score [label="  outputs: (B, L, 2·hidden_dim)"];
-    unpack -> context [style=dashed, constraint=false, label="  outputs (reused)"];
-    context -> dropout;
-    dropout -> fc;
-    fc -> output;
+    input -> embed -> lstm -> attn -> dropout -> fc -> output;
 }

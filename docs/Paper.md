@@ -179,13 +179,10 @@ only sometimes differ per-approach):
 | `seq_num_layers` | $[1, 3]$ | $1$ | Stacked LSTM layers. Kept shallow (max 3) because a from-scratch recurrent stack is harder to optimize as it deepens (vanishing gradients through both time and depth), and because HPO wall-clock is a hard constraint (§ Results) — depth is one of the more expensive ways to spend that budget for the accuracy it typically buys on these datasets. |
 | `seq_pretrained_model_name` | {`distilbert-base-uncased`, `bert-base-uncased`, `google/bert_uncased_L-4_H-512_A-8`, `microsoft/xtremedistil-l6-h256-uncased`} | `distilbert-base-uncased` | Does **not** select a fine-tuned backbone (`sequence-dl` never runs one) — it picks which pretrained model's **WordPiece tokenizer and token-embedding matrix** warm-start the from-scratch BiLSTM. The tokenizer and embedding source are always the same model, since the BiLSTM's vocab indices must line up with whichever embedding matrix seeds it. When the chosen model's native embedding dimensionality doesn't match the sampled `seq_embed_dim`, the embedding matrix is PCA/SVD-projected down (or randomly padded up) to fit — see `_pretrained_embedding_init` in `sequence_dl.py` — which preserves the directions of highest variance in the pretrained embedding space instead of discarding the warm start entirely. |
 
-The diagram below traces `BiLSTMClassifier.forward()` (`automl/core/approaches/sequence_dl.py`)
-top to bottom, annotated with which hyperparameter controls which block: `seq_embed_dim` sizes
-the embedding table (warm-started per `seq_pretrained_model_name`), `hidden_dim`/`seq_num_layers`
-size the bidirectional LSTM stack, and `dropout` regularizes the pooled representation before the
-final classification layer. Sequences are packed before the LSTM and unpacked after so the
-recurrence never runs over padded positions, and pooling is additive (Bahdanau-style) attention
-over every timestep's output rather than just the LSTM's final hidden state.
+The diagram below shows `BiLSTMClassifier`'s data flow (`automl/core/approaches/sequence_dl.py`):
+a warm-started embedding, a bidirectional LSTM sized by `hidden_dim`/`seq_num_layers`, additive
+(Bahdanau-style) attention pooling over every timestep rather than just the final hidden state,
+then dropout and a linear classifier.
 
 ![bilstm_diagram](./bilstm_diagram.svg)
 
