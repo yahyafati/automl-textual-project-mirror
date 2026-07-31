@@ -46,7 +46,7 @@ before the FT-PFN surrogate even enters the picture.
 The `ifbo` **flagship** runs use a larger fidelity range (`min_budget=5`, `max_budget=20`,
 `n_trials=30-40`) than the baseline sweeps below — this is the config the actual
 submission pipeline uses, not a matched ablation. Baseline configs vary by dataset (see
-`runtime_config.json` per run); read wall-clock and step counts alongside accuracy, not
+`runtime_config.jsonc` per run); read wall-clock and step counts alongside accuracy, not
 accuracy alone.
 
 | Dataset | ifBO (flagship) | ifBO-Random | SMAC (BO+HB) | Random Search | README reference (test acc.) |
@@ -82,7 +82,7 @@ signal, not a rigorous beat.
   step counts include repeated visits (thaws) to the same config; "unique configs" is the
   fairer count to compare against Random/SMAC's one-shot-per-trial semantics.
 - **Seeds and budgets aren't held constant across all rows** — see the per-run
-  `runtime_config.json` for exact `n_trials`/`min_budget`/`max_budget`/seed. §1 is the one
+  `runtime_config.jsonc` for exact `n_trials`/`min_budget`/`max_budget`/seed. §1 is the one
   section where every variable is held fixed.
 - Hardware: Apple M2 Max, 12-core CPU, MPS backend, 32GB RAM (`device_info.json` per run).
 

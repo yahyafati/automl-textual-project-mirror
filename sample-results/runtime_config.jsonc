@@ -16,14 +16,14 @@
   "evaluate_incumbent": false,
   "max_num_rows": 20000,
   "val_size": 0.1,
-  "optimizer": "<VARIABLE>",
+  "optimizer": "<VARIABLE>", /* ifbo | random | smac */
   "num_workers": 4,
   "num_parallel_trials": 1,
   "stochastic_epochs": true,
   "stochastic_epoch_fraction": 0.5,
   "log_level": "DEBUG",
-  "ifbo_use_random_selection": false,
-  "ifbo_greedy_candidate_selection": "<VARIABLE>",
+  "ifbo_use_random_selection": "<VARIABLE>",/* true with ifbo as optimizer will not do curve prediction (ifbo-random) */
+  "ifbo_greedy_candidate_selection": true,
   "ifbo_incumbent_ensemble_top_k": 1,
   "ifbo_incumbent_ensemble_accuracy_threshold": 0.1,
   "ifbo_thaw_step": 1,
