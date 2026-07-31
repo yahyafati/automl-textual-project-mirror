@@ -173,4 +173,66 @@ candidate to select, it selects one randomly.
 
 ### Testbed Results
 
+All four methods below were run under a **matched budget** (`n_trials=20`, `min_budget=3`,
+`max_budget=10` epochs, `sequence-dl`/BiLSTM search space) across all five datasets —
+`ag_news`, `amazon`, `dbpedia`, `imdb`, and the held-out exam set `yelp`. Numbers are
+**best validation accuracy** (`1 - min(val_error)`) reached anywhere in the run, i.e. search
+quality, not a held-out test score. Raw histories are in `sample-results/all_results/`; the
+figures below are regenerated straight from those `.jsonl` files (see
+`sample-results/final_results_analysis.ipynb`).
 
+#### Final best validation accuracy
+
+| Dataset | ifBO | SMAC (BO+HB) | Random Search | ifBO (random selection) |
+|---|---|---|---|---|
+| AG News | 0.9135 | 0.8935 | 0.8965 | **0.9245** |
+| Amazon | **0.8915** | 0.7820 | 0.7925 | 0.7930 |
+| DBpedia | **0.9785** | 0.9700 | 0.9780 | 0.9770 |
+| IMDB | **0.9355** | 0.8525 | 0.8670 | 0.8770 |
+| Yelp | **0.5735** | 0.5050 | 0.5510 | 0.5435 |
+
+The full ifBO (FT-PFN-guided) surrogate wins on 4 of 5 datasets, with the largest margins on
+the hardest tasks — Amazon (+9.9pp over the best baseline) and Yelp (+2.3pp over Random, +6.9pp
+over SMAC). On AG News, its own random-selection ablation edges it out (92.45% vs. 91.35%) —
+on the easiest dataset in the suite (all methods clear 89%), the FT-PFN surrogate's
+acquisition doesn't have much signal to exploit over unguided freeze-thaw scheduling, so the
+two land within noise of each other. Everywhere else, guided candidate selection is what
+separates ifBO from its own ablation.
+
+![final accuracy bars](./figures/03_final_accuracy_bars.png)
+
+![accuracy heatmap](./figures/04_accuracy_heatmap.png)
+
+#### Sample efficiency and wall-clock cost
+
+Freeze-thaw's structural advantage shows up earliest here: both ifBO variants pull ahead of
+Random/SMAC within the first 5–7 trials on every dataset, because a handful of thaw steps into
+one promising candidate teach the surrogate (or even just the epsilon-floor exploration alone)
+more than one epoch each spent across many never-revisited configs.
+
+![best accuracy vs trial number](./figures/02_best_vs_trial.png)
+
+![best accuracy vs wallclock time](./figures/01_best_vs_wallclock.png)
+
+Wall-clock tells a second story: Random Search's fixed per-trial budget means it always pays
+for `max_budget` epochs regardless of how a config is doing, so it consistently takes 2–4x
+longer than either ifBO variant for a 20-trial run, without a corresponding accuracy payoff.
+
+![total wallclock time](./figures/08_total_wallclock.png)
+
+#### Where the budget goes
+
+The per-trial accuracy distribution below shows *every* sampled trial, not just the incumbent —
+a tighter, higher box means an optimizer is spending steps on consistently good configs rather
+than wasting them on poor ones. The epoch-budget plot shows the multi-fidelity behavior
+directly: Random Search always trains to the same fixed budget, while SMAC's Hyperband rungs
+and ifBO's continuous freeze-thaw both concentrate later, larger epoch budgets on the
+configurations that already looked promising early.
+
+![per-trial accuracy distribution](./figures/05_accuracy_boxplots.png)
+
+![epoch budget allocated per trial](./figures/06_fidelity_allocation.png)
+
+Finally, the training curve of each method's single best-found configuration per dataset:
+
+![best trial training curves](./figures/07_best_trial_curves.png)
