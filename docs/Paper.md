@@ -1,4 +1,7 @@
-## Problem formulation: freeze-thaw hyperparameter optimization
+# Curve, Freeze, Thaw: HPO with FT-PFN
+
+
+## Problem formulation
 
 Let $\Lambda$ be a hyperparameter search space and $f(\lambda, b)$ the performance (validation
 accuracy, in this project) of configuration $\lambda \in \Lambda$ after being trained for $b$ discrete
@@ -148,13 +151,10 @@ new configurations independent of what the surrogate currently believes.
 
 ## Search space: the `sequence-dl` approach
 
-`sequence-dl` (`automl/core/approaches/sequence_dl.py`) is a BiLSTM-with-attention text
-classifier trained **from scratch** — no fine-tuning of a pretrained encoder — so its search
-space, defined in `build_config_space(fixed_model_type="sequence-dl")`
-(`automl/core/configspacehelper.py`), has to cover both generic optimization knobs and the
+`sequence-dl` is a BiLSTM-with-attention text classifier trained **from scratch** — no fine-tuning of a pretrained 
+encoder — so its search space has to cover both generic optimization knobs and the
 architecture of a recurrent encoder built from nothing. $\Lambda_\text{sequence-dl}$ splits into
-two groups: hyperparameters shared with `transformer` (consumed generically by `TorchTrainer`
-and the data pipeline) and hyperparameters specific to the BiLSTM.
+two groups: hyperparameters shared with `transformer` and hyperparameters specific to the BiLSTM.
 
 **Shared hyperparameters** (both approaches sample these; ranges below are shared, defaults
 only sometimes differ per-approach):
