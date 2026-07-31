@@ -195,8 +195,44 @@ rather than frozen.
 
 ## Methodology
 
+Putting the pieces from the previous sections together, this is what a full search actually
+does end to end, from an empty candidate pool to a finished submission.
+
 ![ifbo_diagram](./ifbo_diagram.svg)
 
+The search starts with nothing: no configuration has been tried yet, and the candidate pool
+is empty. Every iteration opens with a single weighted coin flip that decides whether that
+step explores or exploits — the odds start out heavily favoring exploration, since with an
+empty pool there is nothing yet worth exploiting, and gradually shift toward exploitation as
+the run progresses and a real pool of partially-trained candidates builds up.
+
+An **exploration** step is the simple branch: a brand-new configuration is drawn at random
+from the search space, dropped straight into the pool, and trained for one step immediately —
+no model, no scoring, no comparison against anything else.
+
+An **exploitation** step is where the surrogate does its work. Every candidate already in the
+pool that hasn't yet been trained to the maximum allowed budget is treated as a contender,
+together with one freshly sampled configuration proposed just for this round. All of them are
+laid before the surrogate model at once, alongside the complete history of every partial
+learning curve observed anywhere in the search so far. The surrogate — a model trained once,
+in advance, and never updated again during the search itself — reads that history and, for
+each contender, predicts how likely it is to cross a target performance level within some
+number of additional training steps. Neither the target nor the horizon is fixed: both are
+redrawn at random on every single round, so the search never commits to one fixed idea of
+"how much better" or "how far ahead," and instead samples from a broad spread of possible
+answers each time. Whichever contender comes out on top is the one trained further. If that
+happens to be the freshly proposed configuration, it earns a permanent place in the pool;
+otherwise it's discarded and never considered again.
+
+Whichever branch fires, the chosen configuration is then trained for exactly one more
+increment, its progress is checkpointed, and the new point on its learning curve is appended
+to the shared history the surrogate will read on the next round. This one-step-at-a-time
+cycle — decide, maybe consult the surrogate, train a little further, record the result —
+repeats until the overall budget of decisions runs out.
+
+At the end of the run, rather than keeping only the single best configuration ever seen, the
+strongest handful found across the whole search are retrained to completion and combined by
+majority vote, and it is that ensemble's predictions that make up the final submission.
 
 ## Results
 
