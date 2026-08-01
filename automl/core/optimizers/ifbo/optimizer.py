@@ -14,6 +14,7 @@ from __future__ import annotations
 import gc
 import itertools
 import math
+import os.path
 import random
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Optional
@@ -215,7 +216,9 @@ class IfboOptimizer(Optimizer):
             # download/load race for whichever choice the first parallel
             # batch happens to draw.
             for model_name in SequenceDLApproach.MODEL_NAME_CHOICES:
-                _load_pretrained_word_embeddings(model_name)
+                _load_pretrained_word_embeddings(
+                    os.path.join(SequenceDLApproach.MODELS_DIR, model_name)
+                )
 
         elif runtime_config["approach"] == "transformer":
             from transformers import AutoModel

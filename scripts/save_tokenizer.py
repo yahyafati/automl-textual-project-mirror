@@ -1,6 +1,6 @@
 import argparse
 
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModel
 
 
 def main():
@@ -20,17 +20,27 @@ def main():
         default="./tokenizers",
         help="Base directory where tokenizers will be stored",
     )
+    parser.add_argument(
+        "--models-path",
+        type=str,
+        default="./models",
+        help="Base directory where models will be stored",
+    )
 
     args = parser.parse_args()
 
-    output_dir = f"{args.tokenizers_path}/{args.model_name}"
+    tokenizer_output_dir = f"{args.tokenizers_path}/{args.model_name}"
+    models_output_dir = f"{args.models_path}/{args.model_name}"
 
     print(f"Downloading tokenizer: {args.model_name}")
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    model = AutoModel.from_pretrained(args.model_name)
 
-    print(f"Saving tokenizer to: {output_dir}")
-    tokenizer.save_pretrained(output_dir)
+    print(f"Saving tokenizer to: {tokenizer_output_dir}")
+    tokenizer.save_pretrained(tokenizer_output_dir)
+    print(f"Saving model to: {tokenizer_output_dir}")
+    model.save_pretrained(models_output_dir)
 
     print("Done.")
 

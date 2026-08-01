@@ -15,20 +15,11 @@ ARGS ?=
 help: ## Show this help message.
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make <target>\n\nTargets:\n"} /^[^[:space:]][^:]*:.*##/ {printf "  %-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-install-poetry: ## Install Poetry using pip in the current Python environment.
-	$(PIP) install poetry
-
-install: install-pip ## Install the package in editable mode using pip.
-
-install-pip: ## Install the package in editable mode using pip.
+install:
 	$(PIP) install -e .
 
-install-poetry-env: ## Install project dependencies with Poetry.
-	$(POETRY) install
-
-install-poetry-project: install-poetry-env ## Alias for installing project dependencies with Poetry.
-
-install[poetry]: install-poetry-env ## Alias for installing project dependencies with Poetry.
+uninstall-existing-torch:
+	$(PIP) uninstall -y torch torchaudio torchvision
 
 init: download-datasets tokenizers load-ftpfn ## Download datasets, tokenizers, and FTPFN dependency/model.
 
@@ -71,3 +62,6 @@ test: ## Run the test suite.
 clean: ## Remove common local Python cache files.
 	find . -type d \( -name "__pycache__" -o -name ".pytest_cache" \) -prune -exec rm -rf {} +
 	find . -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+
+streamline: uninstall-existing-torch install init
+	$(PYTHON) -m automl

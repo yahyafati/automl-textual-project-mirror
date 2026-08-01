@@ -5,7 +5,7 @@ data_path: data
 
 seed: 67
 
-evaluation_budget: 30
+evaluation_budget: 70
 max_budget: 50
 min_budget: 1
 n_trials: 100
@@ -13,7 +13,7 @@ optimizer: ifbo
 
 # Wall-clock cap (seconds) on a single trial's training call, checked once
 # per epoch boundary. null = no cap.
-max_trial_time_seconds: 1800
+max_trial_time_seconds: 900
 
 approach: sequence-dl
 num_workers: 1 # TODO: I don't think this is being properly used
@@ -25,14 +25,14 @@ max_trainers_in_memory: 2
 log_level: INFO
 ifbo_use_random_selection: false
 ifbo_greedy_candidate_selection: true
-ifbo_incumbent_ensemble_top_k: 3
+ifbo_incumbent_ensemble_top_k: 1
 ifbo_incumbent_ensemble_accuracy_threshold: 0.05
 
 # Each epoch samples stochastic_epoch_fraction of the training batches
 # instead of iterating the full dataset - cheaper epochs at the cost of
 # per-epoch dataset coverage. Off by default.
 stochastic_epochs: false
-stochastic_epoch_fraction: 0.25
+stochastic_epoch_fraction: 0.5
 
 ifbo_thaw_step: 1
 
@@ -41,4 +41,4 @@ ifbo_thaw_step: 1
 # in _select_next_candidate (prevents it from monopolizing trial budget).
 ifbo_incumbent_exclusion_min_observations: 5
 
-evaluate_incumbent: false
+evaluate_incumbent: true

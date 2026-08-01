@@ -175,13 +175,9 @@ exploration always remains, even late in the run. Each iteration then branches:
     \textbf{plus one additional fresh configuration} sampled
     uniformly from $\Lambda$ for this round only. MFPI-random ($h_\text{rand}, T_\text{rand}$
     redrawn as above) then scores \emph{every} contender --- pending and fresh alike --- against the
-    FT-PFN context in a single batched query, and either takes the arg max
-    (\texttt{ifbo\_greedy\_candidate\_selection}) or samples from a softmax over the PI scores. The fresh
+    FT-PFN context in a single batched query, and takes the arg max over the PI scores. The fresh
     candidate is only appended to the persistent pool if it \emph{wins} this round; otherwise it is
-    discarded and never referenced again. A \texttt{ifbo\_use\_random\_selection} flag swaps this scoring
-    step for a uniform choice among the same contenders (pending + fresh), which is what backs
-    the ``freeze-thaw random'' baseline (see Results, below).
-    \color{red}{\textbf{TODO: Add some experiment results for greedy and softmax methods}}
+    discarded and never referenced again.
 \end{itemize}
 
 One more rule guards the exploitation branch: once the current best-so-far candidate has
@@ -222,7 +218,7 @@ only sometimes differ per-approach):
 
     \item[\texttt{optimizer}] \hfill \\
     \textbf{Range:} \{\texttt{adam}, \texttt{adamw}, \texttt{sgd}\} \quad | \quad \textbf{Default:} \texttt{adamw} \\
-    \textit{Rationale:} {\color{red}{\texttt{sgd} is only a sane choice for a shallow from-scratch model like this (it would badly under-perform fine-tuning a transformer, so \texttt{transformer}'s search space excludes it); \texttt{adamw}/\texttt{adam} cover the common default choices.}}
+    \textit{Rationale:} ---
 
     \item[\texttt{scheduler}] \hfill \\
     \textbf{Range:} \{\texttt{steplr}, \texttt{cosine}, \texttt{exponentiallr}, \texttt{reducelronplateau}\} \quad | \quad \textbf{Default:} \texttt{cosineannealinglr} \\
@@ -238,7 +234,7 @@ only sometimes differ per-approach):
 
     \item[\texttt{warmup\_ratio}] \hfill \\
     \textbf{Range:} $[0.0, 0.2]$ \quad | \quad \textbf{Default:} $0.1$ \\
-    \textit{Rationale:} {\color{red}{Fraction of total steps spent on linear LR warmup before the main schedule kicks in --- guards against the early, high-variance gradients typical of a randomly-initialized model (the embedding layer here is warm-started, but the LSTM and attention weights are not).}}
+    \textit{Rationale:} Fraction of total steps spent on linear LR warmup before the main schedule kicks in --- guards against the early, high-variance gradients typical of a randomly-initialized model.
 \end{description}
 
 
@@ -266,7 +262,7 @@ only sometimes differ per-approach):
     \item[\texttt{seq\_pretrained\_model\_name}] \hfill \\
     \textbf{Range:} \{\texttt{distilbert-base-uncased}, \texttt{bert-base-uncased}, \texttt{google/bert\_uncased\_L-4\_H-512\_A-8}, \texttt{microsoft/xtremedistil-l6-h256-uncased}\} \\
     \textbf{Default:} \texttt{distilbert-base-uncased} \\
-    \textit{Rationale:} {\color{red}{Does \textbf{not} select a fine-tuned backbone (\texttt{sequence-dl} never runs one) --- it picks which pretrained model's \textbf{WordPiece tokenizer and token-embedding matrix} warm-start the from-scratch BiLSTM. The tokenizer and embedding source are always the same model, since the BiLSTM's vocab indices must line up with whichever embedding matrix seeds it. When the chosen model's native embedding dimensionality doesn't match the sampled \texttt{seq\_embed\_dim}, the embedding matrix is PCA/SVD-projected down (or randomly padded up) to fit --- see \texttt{\_pretrained\_embedding\_init} in \texttt{sequence\_dl.py} --- which preserves the directions of highest variance in the pretrained embedding space instead of discarding the warm start entirely.}}
+    \textit{Rationale:} Does \textbf{not} select a fine-tuned backbone (\texttt{sequence-dl} never runs one) --- it picks which pretrained model's \textbf{WordPiece tokenizer and token-embedding matrix} warm-start the from-scratch BiLSTM. The tokenizer and embedding source are always the same model, since the BiLSTM's vocab indices must line up with whichever embedding matrix seeds it. When the chosen model's native embedding dimensionality doesn't match the sampled \texttt{seq\_embed\_dim}, the embedding matrix is PCA/SVD-projected down (or randomly padded up) to fit --- see \texttt{\_pretrained\_embedding\_init} in \texttt{sequence\_dl.py} --- which preserves the directions of highest variance in the pretrained embedding space instead of discarding the warm start entirely.
 \end{description}
 
 The diagram below shows \texttt{BiLSTMClassifier}'s data flow (\texttt{automl/core/approaches/sequence\_dl.py}):
@@ -287,7 +283,7 @@ And unlike \texttt{transformer}, there is no \texttt{freeze\_ratio}-equivalent k
 end-to-end here to freeze in the first place, only the embedding matrix, and that is warm-started
 rather than frozen.
 
-\section*{Methodology}
+\section*{Code Flow}
 
 Putting the pieces from the previous sections together, this is what a full search actually
 does end to end, from an empty candidate pool to a finished submission.
@@ -342,38 +338,38 @@ min_budget: 3
 n_trials: 20
 \end{verbatim}
 
-\subsection*{Baselines}
-
-Three baselines, each isolating a different piece of what makes the flagship method work ---
-every one answers a specific ``would doing less still work?'' question rather than just being an
-arbitrary point of comparison:
-
-\begin{itemize}
-    \item \textbf{Random Search} --- no multi-fidelity behavior at all: every trial
-    samples a fresh configuration uniformly from $\Lambda$ and trains it straight through to
-    \texttt{max\_budget} epochs before it's ever compared against anything else. It never resumes a
-    partially-trained config and never cuts a bad one short. This is the floor every other method
-    has to beat to justify its extra machinery, and it also sets an upper bound on wall-clock cost
-    per trial, since it always pays for the \emph{full} epoch budget regardless of how a config is
-    doing partway through (see the wall-clock comparison below --- this is exactly why its bars are
-    tallest everywhere).
-    \item \textbf{SMAC (BO+HB)} --- SMAC3's random-forest-surrogate Bayesian
-    optimization, paired with a Hyperband intensifier for multi-fidelity scheduling (successive
-    halving: only the top fraction of configs at each rung's budget get promoted to the next,
-    larger one). This isolates what a \emph{classical, non-neural} multi-fidelity method achieves under
-    the same epoch-budget range as ifBO --- the fairest like-for-like comparison against the
-    flagship method, since both get to allocate budget adaptively instead of uniformly, but SMAC
-    does it with a random-forest-EI surrogate and a handful of \emph{discrete} Hyperband rungs, instead
-    of FT-PFN's in-context transformer and \emph{continuous} freeze-thaw (visible directly in the
-    fidelity-allocation figure below: SMAC's budget trace is a coarse two-level sawtooth, ifBO's
-    is a much finer staircase).
-    \item \textbf{ifBO (random selection)} --- runs the \emph{exact same} freeze-thaw pipeline and candidate-pool
-    machinery as the flagship method, but with \texttt{ifbo\_use\_random\_selection=True}: FT-PFN's MFPI-random scoring is swapped for a uniform random choice among that round's contenders (pending candidates + one fresh proposal). This is the
-    most targeted ablation of the three --- everything about \emph{how much} budget is spent
-    incrementally vs.\ upfront is held identical to the flagship run, so any gap between this and
-    full ifBO isolates the value of the \emph{surrogate's guidance specifically}, separate from the
-    value of freeze-thaw scheduling in general.
-\end{itemize}
+%\subsection*{Baselines}
+%
+%Three baselines, each isolating a different piece of what makes the flagship method work ---
+%every one answers a specific ``would doing less still work?'' question rather than just being an
+%arbitrary point of comparison:
+%
+%\begin{itemize}
+%    \item \textbf{Random Search} --- no multi-fidelity behavior at all: every trial
+%    samples a fresh configuration uniformly from $\Lambda$ and trains it straight through to
+%    \texttt{max\_budget} epochs before it's ever compared against anything else. It never resumes a
+%    partially-trained config and never cuts a bad one short. This is the floor every other method
+%    has to beat to justify its extra machinery, and it also sets an upper bound on wall-clock cost
+%    per trial, since it always pays for the \emph{full} epoch budget regardless of how a config is
+%    doing partway through (see the wall-clock comparison below --- this is exactly why its bars are
+%    tallest everywhere).
+%    \item \textbf{SMAC (BO+HB)} --- SMAC3's random-forest-surrogate Bayesian
+%    optimization, paired with a Hyperband intensifier for multi-fidelity scheduling (successive
+%    halving: only the top fraction of configs at each rung's budget get promoted to the next,
+%    larger one). This isolates what a \emph{classical, non-neural} multi-fidelity method achieves under
+%    the same epoch-budget range as ifBO --- the fairest like-for-like comparison against the
+%    flagship method, since both get to allocate budget adaptively instead of uniformly, but SMAC
+%    does it with a random-forest-EI surrogate and a handful of \emph{discrete} Hyperband rungs, instead
+%    of FT-PFN's in-context transformer and \emph{continuous} freeze-thaw (visible directly in the
+%    fidelity-allocation figure below: SMAC's budget trace is a coarse two-level sawtooth, ifBO's
+%    is a much finer staircase).
+%    \item \textbf{ifBO (random selection)} --- runs the \emph{exact same} freeze-thaw pipeline and candidate-pool
+%    machinery as the flagship method, but with \texttt{ifbo\_use\_random\_selection=True}: FT-PFN's MFPI-random scoring is swapped for a uniform random choice among that round's contenders (pending candidates + one fresh proposal). This is the
+%    most targeted ablation of the three --- everything about \emph{how much} budget is spent
+%    incrementally vs.\ upfront is held identical to the flagship run, so any gap between this and
+%    full ifBO isolates the value of the \emph{surrogate's guidance specifically}, separate from the
+%    value of freeze-thaw scheduling in general.
+%\end{itemize}
 
 \subsection*{Testbed Results}
 

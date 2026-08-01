@@ -178,6 +178,7 @@ class BiLSTMClassifier(nn.Module):
 class SequenceDLApproach(Approach[torch.nn.Module, dict]):
 
     TOKENIZERS_DIR = "./tokenizers"
+    MODELS_DIR = "./models"
     DEFAULT_MODEL_NAME = "distilbert-base-uncased"
     # Vendored locally under TOKENIZERS_DIR (see save_tokenizer.py); the
     # `seq_pretrained_model_name` hyperparameter picks between these.
@@ -220,6 +221,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         self._sep_token_id: Optional[int] = None
         self._model_name: str = self.DEFAULT_MODEL_NAME
         self._tokenizer_path: str = f"{self.TOKENIZERS_DIR}/{self._model_name}"
+        self._model_path: str = f"{self.MODELS_DIR}/{self._model_name}"
 
     def initialize(self):
         pass
@@ -240,6 +242,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         batch_size = int(self.get_param_value("batch_size"))
         self._model_name = self.get_param_value("seq_pretrained_model_name")
         self._tokenizer_path = f"{self.TOKENIZERS_DIR}/{self._model_name}"
+        self._model_path = f"{self.MODELS_DIR}/{self._model_name}"
 
         logger.debug(
             f"[{self.name}] prepare(): max_seq_len={max_seq_len}, "
