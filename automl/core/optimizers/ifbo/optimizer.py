@@ -467,23 +467,32 @@ class IfboOptimizer(Optimizer):
         - If the candidate list is empty, sample a new candidate.
         - Otherwise, with probability epsilon, force-sample a brand new
           candidate unconditionally (guaranteed exploration floor,
-          independent of the surrogate).
+          independent of the surrogate). This is the *only* way new
+          candidates enter the pool once it's non-empty (see below).
         - Otherwise (probability 1 - epsilon), score the pending existing
-          candidates *and* one freshly-sampled, not-yet-pooled candidate
-          together using PI(T_rand): the fresh candidate only joins
-          `self.candidates` if it wins this round's competition, otherwise
-          it is discarded. This lets exploitation rounds still surface
-          genuinely new regions of the space (per the surrogate's belief)
-          without unconditionally growing the pool - and therefore the
-          FT-PFN context size - on every round the way pure epsilon-driven
-          injection would.
+          candidates using PI(T_rand) and select among them only - no
+          freshly-sampled candidate competes in this round. An earlier
+          version also threw a freshly-sampled, not-yet-pooled candidate
+          into this competition (added to `self.candidates` if it won),
+          meant to let exploitation rounds surface genuinely new regions
+          of the space too. In practice this backfired: a never-observed
+          candidate's predictive distribution under FT-PFN is wide/
+          uncertain, which inflates its PI score against a high threshold
+          relative to an already-observed candidate the surrogate is
+          confident is mediocre - so once the true incumbent was excluded
+          (see below), exploitation rounds kept minting one-shot novel
+          candidates instead of refining known-promising runners-up.
         - The current best-so-far candidate is dropped from this round's
           pending pool once it has `>= ifbo_incumbent_exclusion_min_observations`
           observations, so it stops monopolizing budget by repeatedly
           re-winning PI(T_rand) against its own (barely-above-f_best) target.
+          If that (or the max-steps filter) leaves no pending candidates
+          at all, fall back to sampling a fresh one - there's nothing left
+          to refine this round.
         - Sample a random future horizon h_rand in {1, ..., b_max}.
         - Sample a random target T_rand above current best accuracy.
-        - For each contender, query FT-PFN at time t' = (steps_done + h_rand)/b_max.
+        - For each pending candidate, query FT-PFN at time
+          t' = (steps_done + h_rand)/b_max.
         - Then advance the selected candidate by h_rand freeze-thaw steps.
 
         `exclude` holds `uid`s of candidates already picked earlier in the
@@ -543,18 +552,18 @@ class IfboOptimizer(Optimizer):
                     incumbent_candidate.steps_done,
                 )
 
-        # Propose one fresh, not-yet-pooled candidate as an extra contender.
-        # It's only appended to self.candidates below if it wins the
-        # competition - otherwise its uid is simply never referenced again.
-        fresh = self._sample_new_candidate()
-        contenders: list[_IfBOCandidate] = pending + [fresh]
+        if not pending:
+            self.logger.debug(
+                "No pending candidates left this round (all maxed out or "
+                "excluded) - sampling a new one."
+            )
+            candidate = self._sample_new_candidate()
+            self.candidates.append(candidate)
+            return candidate
 
         # For baselines
         if self.ifbo_use_random_selection:
-            selected = self._rng.choice(contenders)
-            if selected is fresh:
-                self.candidates.append(fresh)
-            return selected
+            return self._rng.choice(pending)
 
         MAX_LOOKAHEAD = 5
         f_best = self._best_so_far_accuracy()
@@ -563,7 +572,7 @@ class IfboOptimizer(Optimizer):
         T_rand = f_best + tau_rand * (1.0 - f_best)
 
         query: list[Curve] = []
-        for c in contenders:
+        for c in pending:
             t_query = min(c.steps_done + h_rand, self.b_max) / self.b_max
             query.append(
                 Curve(
@@ -586,17 +595,13 @@ class IfboOptimizer(Optimizer):
 
         if self.greedy_selection:
             idx = torch.argmax(pi_scores)
-            selected = contenders[idx]
+            selected = pending[idx]
         else:
             weights = torch.softmax(pi_scores, dim=0).tolist()
-            selected = self._rng.choices(contenders, weights=weights, k=1)[0]
+            selected = self._rng.choices(pending, weights=weights, k=1)[0]
 
         # Free inference-related variables right away
         del query, predictions, T_tensor
-
-        if selected is fresh:
-            self.logger.debug("Fresh candidate won the round, adding to pool.")
-            self.candidates.append(fresh)
 
         return selected
 
