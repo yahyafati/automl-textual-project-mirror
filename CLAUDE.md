@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 An AutoML system for text classification (SS26 AutoML exam, Freiburg). Given one of
 5 datasets (`ag_news`, `imdb`, `amazon`, `dbpedia` — practice; `yelp` — held-out
 exam/test set), it runs a hyperparameter-optimization search over model configs and
-produces a `predictions.npy` for the test split. See `docs/PROJECT_OVERVIEW.md` for a
-full technical deep-dive, `docs/IFBO_METHOD.md` for the flagship optimizer's algorithm,
-and `docs/PARALLELISM.md` for the concurrency model — read those before making
+produces a `predictions.npy` for the test split. See `docs/PROJECT_OVERVIEW.ignore.md` for a
+full technical deep-dive, `docs/IFBO_METHOD.ignore.md` for the flagship optimizer's algorithm,
+and `docs/PARALLELISM.ignore.md` for the concurrency model — read those before making
 non-trivial changes to optimizers or the training loop.
 
 ## Commands
@@ -117,7 +117,7 @@ Under `num_parallel_trials > 1`, `DataLoader(num_workers>0)` forking while anoth
 thread holds the history `FileLock` can deadlock/crash (`filelock` refuses forks
 mid-acquire on Python 3.12+). Effective `num_workers` is forced to `0` whenever
 `parallelism > 1` — tokenization is already cached upfront so this costs little. See
-`docs/PARALLELISM.md` before changing anything about `num_parallel_trials` or worker
+`docs/PARALLELISM.ignore.md` before changing anything about `num_parallel_trials` or worker
 counts.
 
 ### Producing the final submission
