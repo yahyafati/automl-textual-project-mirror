@@ -106,8 +106,8 @@ def build_plan(
     batch_ts: str,
 ) -> list[dict[str, Any]]:
     plan = []
-    for variant in variants:
-        for seed in seeds:
+    for seed in seeds:
+        for variant in variants:
             runtime_id = f"[{variant}]seed{seed}_{batch_ts}"
             cfg = copy.deepcopy(base_cfg)
             cfg.update(generic_overrides)
