@@ -318,7 +318,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         # Build model
         vocab_size = self.tokenizer.vocab_size
         pretrained_embeddings = _pretrained_embedding_init(
-            self._model_name, vocab_size, embed_dim
+            self._model_path, vocab_size, embed_dim
         )
         self.model = BiLSTMClassifier(
             vocab_size=vocab_size,

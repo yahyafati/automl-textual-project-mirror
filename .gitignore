@@ -193,6 +193,7 @@ wandb
 temp-plots
 
 tokenizers/
+models/
 .model/
 
 runconfig.local.yml
