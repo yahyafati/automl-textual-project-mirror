@@ -390,6 +390,31 @@ n_trials: 20
 
 \subsection*{Testbed Results}
 
+\subsection*{Final Submission Results}
 
+\textit{TODO (placeholder): experiment in progress as of 2026-08-02, not yet complete for all
+datasets --- fill in this table once every dataset's run finishes and
+\texttt{train\_top\_k\_from\_history.py} has produced and submitted \texttt{predictions.npy}
+for each. This is the flagship ifBO config's actual \textbf{held-out test accuracy}, reported
+against the \texttt{Reference Accuracy} baseline from \texttt{README.md}'s dataset meta-data
+table --- a different, stricter number than a best-validation-accuracy testbed figure would be.
+Run config: \texttt{optimizer=ifbo} (greedy candidate selection), \texttt{approach=sequence-dl},
+\texttt{seed=67}, \texttt{n\_trials=20}, \texttt{min\_budget=3}/\texttt{max\_budget=10} epochs,
+\texttt{stochastic\_epochs=true}, \texttt{evaluation\_budget=30}, \texttt{max\_num\_rows=30000}.
+Raw histories land in \texttt{actual-results/<dataset>/<runtime\_id>/}.}
+
+\begin{center}
+\begin{tabular}{lccc}
+\hline
+Dataset & Test Accuracy & Reference Accuracy & $\Delta$ vs.\ Reference \\
+\hline
+AG News & TBD & 90.265\% & TBD \\
+Amazon & TBD & 81.799\% & TBD \\
+DBpedia & TBD & 97.882\% & TBD \\
+IMDB & TBD & 86.993\% & TBD \\
+Yelp & TBD & 62.082\% & TBD \\
+\hline
+\end{tabular}
+\end{center}
 
 \end{document}

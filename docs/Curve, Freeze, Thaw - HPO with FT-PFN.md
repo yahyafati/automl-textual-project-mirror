@@ -428,3 +428,24 @@ cost, since freeze-thaw was able to recognize this config's quality early and ne
 push it further.
 
 ![best trial training curves](./figures/07_best_trial_curves.png)
+
+### Final Submission Results
+
+> **TODO (placeholder):** experiment in progress as of 2026-08-02, not yet complete for all
+> datasets — fill in this table once every dataset's run finishes and
+> `train_top_k_from_history.py` has produced and submitted `predictions.npy` for each. This is
+> the flagship `ifBO` config's actual **held-out test accuracy**, reported against the
+> `Reference Accuracy` baseline from `README.md`'s dataset meta-data table — a different,
+> stricter number than the best-validation-accuracy figures in the Testbed Results above.
+> Run config: `optimizer=ifbo` (greedy candidate selection), `approach=sequence-dl`,
+> `seed=67`, `n_trials=20`, `min_budget=3`/`max_budget=10` epochs, `stochastic_epochs=true`
+> (new relative to the Testbed Results runs above), `evaluation_budget=30`,
+> `max_num_rows=30000`. Raw histories land in `actual-results/<dataset>/<runtime_id>/`.
+
+| Dataset | Test Accuracy | Reference Accuracy | Δ vs. Reference |
+|---|---|---|---|
+| AG News | TBD | 90.265% | TBD |
+| Amazon | TBD | 81.799% | TBD |
+| DBpedia | TBD | 97.882% | TBD |
+| IMDB | TBD | 86.993% | TBD |
+| Yelp | TBD | 62.082% | TBD |
