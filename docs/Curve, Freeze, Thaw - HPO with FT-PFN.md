@@ -120,48 +120,54 @@ exploration always remains, even late in the run. Each iteration then branches:
   sampled uniformly from $\Lambda$, added to the pool with zero observations, and selected
   directly — bypassing the surrogate entirely.
 - **With probability $1-\epsilon(t)$** (an exploitation round): the *pending* pool (candidates
-  not yet at $b_\max$, minus any already claimed earlier in the same parallel batch, and minus
-  the current best-so-far candidate once it meets the incumbent-exclusion rule below) is
+  not yet at $b_\max$, minus any already claimed earlier in the same parallel batch) is
   assembled. MFPI-random ($h_\text{rand}, T_\text{rand}$ redrawn as in §5.1) then scores every
   member of that pool against the FT-PFN context in a single batched query, and either takes
   the arg max (`ifbo_greedy_candidate_selection`) or samples from a softmax over the PI scores.
   A `ifbo_use_random_selection` flag swaps this scoring step for a uniform choice among the
   same pending pool, which is what backs the "freeze-thaw random" baseline (see Results,
-  below). If the pending pool is empty this round (everything left is either maxed out or the
-  just-excluded incumbent), a fresh configuration is sampled as a fallback instead, the same as
-  an exploration step.
+  below). If the pending pool is empty this round (everything left is maxed out), a fresh
+  configuration is sampled as a fallback instead, the same as an exploration step.
   **TODO: Add some experiment results for greedy and softmax methods**
 
-One more rule guards the exploitation branch: once the current best-so-far candidate has
-accumulated at least `ifbo_incumbent_exclusion_min_observations` (default $2$) freeze-thaw
-steps, it is temporarily dropped from the pending pool for that round. Left unchecked, it tends
-to keep re-winning $\mathrm{PI}(T_\text{rand})$ against its own already-confirmed best (since
+**Fresh candidates no longer compete in exploitation rounds, and neither does an
+incumbent-exclusion rule that used to wall off the current best-so-far candidate — neither is
+part of the published ifBO method, which is stated over the whole search space $\Lambda$
+implicitly rather than an explicit, growing candidate list.** Both existed in an earlier
+version of this implementation: a freshly-sampled, not-yet-pooled configuration was thrown into
+every exploitation round's competition alongside `pending`, reasoning that it would let
+exploitation rounds surface genuinely new regions of the space too, without unconditionally
+growing the pool (and the FT-PFN context) on every round the way pure $\epsilon$-driven
+injection would; and separately, once the current best-so-far candidate had accumulated at
+least `ifbo_incumbent_exclusion_min_observations` (then default $2$) freeze-thaw steps, it was
+temporarily dropped from the pending pool for that round, on the reasoning that otherwise it
+would keep re-winning $\mathrm{PI}(T_\text{rand})$ against its own already-confirmed best (since
 $T_\text{rand}$ sits just above $f_\text{best}$), sinking budget into repeatedly re-thawing
 itself instead of advancing or discovering other candidates.
 
-**A fresh candidate no longer competes in exploitation rounds — neither of these two rules is
-part of the published ifBO method, which is stated over the whole search space $\Lambda$
-implicitly rather than an explicit, growing candidate list.** An earlier version of this
-implementation *did* throw one freshly-sampled, not-yet-pooled configuration into every
-exploitation round's competition alongside `pending`, reasoning that it would let exploitation
-rounds surface genuinely new regions of the space too, without unconditionally growing the pool
-(and the FT-PFN context) on every round the way pure $\epsilon$-driven injection would. In
-practice this backfired specifically under greedy selection, and a seed sweep in
-`sample-results/seeded/` (`ifbo-greedy` vs. `ifbo-random`, matched seeds on `amazon`) traced
-why: once the incumbent-exclusion rule above walls off the current best, every *pending*
-candidate is a known quantity the surrogate confidently ranks below the now-frozen target — but
-a never-observed candidate's predictive distribution under FT-PFN is wide/uncertain, which
-inflated its PI score against that same high threshold relative to an already-observed,
-confidently-mediocre pending candidate. Concretely, in `ifbo-greedy-seed36.jsonl` the eventual
-best configuration was found at trial 3 of 20 and never selected again — every subsequent
-exploitation round instead won by minting a new, never-tried candidate, none of which beat it
-either, so the run's reported best accuracy was capped at whatever that one candidate reached
-in its first two thaws (0.811). The matched `ifbo-random-seed36.jsonl` run, by contrast, kept
-refining its top two candidates via leapfrogging — the incumbent-exclusion rule only walls off
-whichever candidate currently leads, so a runner-up overtaking it frees the original back up —
-climbing all the way to 0.878. New candidates now enter the pool strictly via the
-$\epsilon(t)$-floor draw or the empty-pending fallback above, so exploitation rounds are forced
-to spend their budget refining known candidates instead of chasing novelty.
+In practice the combination of both rules backfired specifically under greedy selection, and a
+seed sweep in `sample-results/seeded/` (`ifbo-greedy` vs. `ifbo-random`, matched seeds on
+`amazon`) traced why: once the incumbent-exclusion rule walled off the current best, every
+*pending* candidate was a known quantity the surrogate confidently ranked below the now-frozen
+target — but a never-observed candidate's predictive distribution under FT-PFN is
+wide/uncertain, which inflated its PI score against that same high threshold relative to an
+already-observed, confidently-mediocre pending candidate. Concretely, in
+`ifbo-greedy-seed36.jsonl` the eventual best configuration was found at trial 3 of 20 and never
+selected again — every subsequent exploitation round instead won by minting a new, never-tried
+candidate, none of which beat it either, so the run's reported best accuracy was capped at
+whatever that one candidate reached in its first two thaws (0.811). The matched
+`ifbo-random-seed36.jsonl` run, by contrast, kept refining its top two candidates via
+leapfrogging — the incumbent-exclusion rule only walled off whichever candidate currently led,
+so a runner-up overtaking it freed the original back up — climbing all the way to 0.878.
+
+Fresh-candidate injection into exploitation rounds was removed first, so that new candidates
+enter the pool strictly via the $\epsilon(t)$-floor draw or the empty-pending fallback above.
+The incumbent-exclusion rule was removed afterward: the pending pool for an exploitation round
+is now simply every candidate not yet at $b_\max$ and not already claimed elsewhere in the same
+parallel batch, with the current best-so-far candidate no longer walled off from that
+competition. Exploitation rounds still can't mint brand-new candidates on a whim — that only
+happens via the $\epsilon$-floor draw or the empty-pending fallback — so budget spent
+exploiting is still spent refining candidates already in the pool, incumbent included.
 
 ## Search space: the `sequence-dl` approach
 
@@ -225,20 +231,17 @@ from the search space, dropped straight into the pool, and trained for one step 
 no model, no scoring, no comparison against anything else.
 
 An **exploitation** step is where the surrogate does its work. Every candidate already in the
-pool that hasn't yet been trained to the maximum allowed budget is treated as a contender —
-except the current best-so-far candidate, once it's accumulated enough freeze-thaw steps to
-trigger the incumbent-exclusion rule (§ Growing the candidate pool). All of them are laid
-before the surrogate model at once, alongside the complete history of every partial learning
-curve observed anywhere in the search so far. The surrogate — a model trained once, in
-advance, and never updated again during the search itself — reads that history and, for each
-contender, predicts how likely it is to cross a target performance level within some number of
-additional training steps. Neither the target nor the horizon is fixed: both are redrawn at
-random on every single round, so the search never commits to one fixed idea of "how much
-better" or "how far ahead," and instead samples from a broad spread of possible answers each
-time. Whichever contender comes out on top is the one trained further. If there are no
-contenders at all this round (every pending candidate is either maxed out or the
-just-excluded incumbent), a brand-new configuration is sampled instead, the same as an
-exploration step.
+pool that hasn't yet been trained to the maximum allowed budget is treated as a contender,
+current best-so-far included. All of them are laid before the surrogate model at once,
+alongside the complete history of every partial learning curve observed anywhere in the search
+so far. The surrogate — a model trained once, in advance, and never updated again during the
+search itself — reads that history and, for each contender, predicts how likely it is to cross
+a target performance level within some number of additional training steps. Neither the target
+nor the horizon is fixed: both are redrawn at random on every single round, so the search never
+commits to one fixed idea of "how much better" or "how far ahead," and instead samples from a
+broad spread of possible answers each time. Whichever contender comes out on top is the one
+trained further. If there are no contenders at all this round (every pending candidate is
+maxed out), a brand-new configuration is sampled instead, the same as an exploration step.
 
 Whichever branch fires, the chosen configuration is then trained for exactly one more
 increment, its progress is checkpointed, and the new point on its learning curve is appended
@@ -285,8 +288,8 @@ arbitrary point of comparison:
   fidelity-allocation figure below: SMAC's budget trace is a coarse two-level sawtooth, ifBO's
   is a much finer staircase).
 - **ifBO (random selection)** — runs the *exact same* freeze-thaw pipeline and candidate-pool
-  machinery as the flagship method (checkpoint resumption, the epsilon-floor exploration
-  schedule, the incumbent-exclusion rule — see "Growing the candidate pool" above), but with
+  machinery as the flagship method (checkpoint resumption and the epsilon-floor exploration
+  schedule — see "Growing the candidate pool" above), but with
   `ifbo_use_random_selection=True`: FT-PFN's MFPI-random scoring is swapped for a uniform random
   choice among that round's pending pool. This is the most targeted ablation of the three —
   everything about *how much* budget is spent incrementally vs. upfront is held identical to

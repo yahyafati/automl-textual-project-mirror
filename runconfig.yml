@@ -36,9 +36,4 @@ stochastic_epoch_fraction: 0.5
 
 ifbo_thaw_step: 1
 
-# Minimum number of freeze-thaw observations the current best-so-far
-# candidate must have before it's excluded from the acquisition competition
-# in _select_next_candidate (prevents it from monopolizing trial budget).
-ifbo_incumbent_exclusion_min_observations: 5
-
 evaluate_incumbent: true

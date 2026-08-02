@@ -86,20 +86,6 @@ class IfboOptimizer(Optimizer):
         )
         self._thaw_step: int = runtime_config.get("ifbo_thaw_step", 1)
 
-        # Minimum number of freeze-thaw observations the current best-so-far
-        # candidate must have before it's eligible to be excluded from the
-        # acquisition competition (see `_select_next_candidate`) - guards
-        # against freezing it out on the strength of a single, possibly
-        # noisy, observation.
-        self.incumbent_exclusion_min_observations: int = int(
-            runtime_config.get("ifbo_incumbent_exclusion_min_observations", 2)
-        )
-        if self.incumbent_exclusion_min_observations < 1:
-            raise ValueError(
-                "[IfboOptimizer] ifbo_incumbent_exclusion_min_observations "
-                f"must be >= 1, got {self.incumbent_exclusion_min_observations}."
-            )
-
         if self.incumbent_ensemble_top_k < 1:
             raise ValueError(
                 "[IfboOptimizer] ifbo_incumbent_ensemble_top_k must be >= 1, "
@@ -126,8 +112,7 @@ class IfboOptimizer(Optimizer):
             "[IfboOptimizer] Initialized with dynamic candidates, budgets in [%d, %d], "
             "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f, "
             "ifbo_use_random_selection=%s, greedy_selection=%s, "
-            "incumbent_ensemble_top_k=%d, incumbent_ensemble_accuracy_threshold=%.4f, "
-            "incumbent_exclusion_min_observations=%d",
+            "incumbent_ensemble_top_k=%d, incumbent_ensemble_accuracy_threshold=%.4f",
             self.min_budget,
             self.max_budget,
             self.b_max,
@@ -138,7 +123,6 @@ class IfboOptimizer(Optimizer):
             self.greedy_selection,
             self.incumbent_ensemble_top_k,
             self.incumbent_ensemble_accuracy_threshold,
-            self.incumbent_exclusion_min_observations,
         )
 
         # Load FT-PFN surrogate model
@@ -479,16 +463,7 @@ class IfboOptimizer(Optimizer):
           candidate's predictive distribution under FT-PFN is wide/
           uncertain, which inflates its PI score against a high threshold
           relative to an already-observed candidate the surrogate is
-          confident is mediocre - so once the true incumbent was excluded
-          (see below), exploitation rounds kept minting one-shot novel
-          candidates instead of refining known-promising runners-up.
-        - The current best-so-far candidate is dropped from this round's
-          pending pool once it has `>= ifbo_incumbent_exclusion_min_observations`
-          observations, so it stops monopolizing budget by repeatedly
-          re-winning PI(T_rand) against its own (barely-above-f_best) target.
-          If that (or the max-steps filter) leaves no pending candidates
-          at all, fall back to sampling a fresh one - there's nothing left
-          to refine this round.
+          confident is mediocre.
         - Sample a random future horizon h_rand in {1, ..., b_max}.
         - Sample a random target T_rand above current best accuracy.
         - For each pending candidate, query FT-PFN at time
@@ -523,34 +498,6 @@ class IfboOptimizer(Optimizer):
             for c in self.candidates
             if c.steps_done < self.b_max and c.uid not in excluded_uids
         ]
-
-        # Once the current best-so-far candidate has been thawed at least
-        # `incumbent_exclusion_min_observations` times, drop it from
-        # contention this round. Left unchecked, it tends to keep re-winning
-        # PI(T_rand) against its own already-confirmed best (T_rand sits
-        # just above f_best), sinking budget into re-thawing itself instead
-        # of exploring/advancing other candidates.
-        #
-        # Gated on `steps_done` (grid position / number of thaw calls),
-        # not `len(ys)`: since `_step` now records one curve point per
-        # epoch actually trained rather than one point per call, `len(ys)`
-        # can jump by more than one on a single thaw (e.g. min_budget > 1
-        # or ifbo_thaw_step > 1) and would trip this gate prematurely.
-        incumbent_candidate = self._select_incumbent_candidate()
-        if (
-            math.isfinite(self._candidate_best_accuracy(incumbent_candidate))
-            and incumbent_candidate.steps_done
-            >= self.incumbent_exclusion_min_observations
-        ):
-            before = len(pending)
-            pending = [c for c in pending if c.uid != incumbent_candidate.uid]
-            if len(pending) < before:
-                self.logger.debug(
-                    "Excluding current best-so-far candidate (uid=%d, "
-                    "steps_done=%d) from this round's competition.",
-                    incumbent_candidate.uid,
-                    incumbent_candidate.steps_done,
-                )
 
         if not pending:
             self.logger.debug(
@@ -609,13 +556,6 @@ class IfboOptimizer(Optimizer):
     def _candidate_best_accuracy(c: _IfBOCandidate) -> float:
         vals = [y for y in c.ys if math.isfinite(y)]
         return max(vals) if vals else float("-inf")
-
-    def _select_incumbent_candidate(self) -> _IfBOCandidate:
-        """
-        Select the best candidate observed so far, based on maximum accuracy
-        across all evaluated budgets.
-        """
-        return max(self.candidates, key=self._candidate_best_accuracy)
 
     def _select_incumbent_candidates(self) -> list[_IfBOCandidate]:
         """

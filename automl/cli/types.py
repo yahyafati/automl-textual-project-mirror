@@ -63,11 +63,3 @@ class RuntimeConfig(TypedDict):
     ifbo_incumbent_ensemble_top_k: int
     ifbo_incumbent_ensemble_accuracy_threshold: float
     ifbo_thaw_step: int
-
-    # Minimum number of freeze-thaw observations (i.e. `_step` calls) the
-    # current best-so-far candidate must have accumulated before it becomes
-    # eligible to be excluded from the acquisition competition in
-    # `_select_next_candidate`. Prevents the incumbent from repeatedly
-    # re-winning PI(T_rand) and monopolizing trial budget, while still
-    # letting it be double-checked at least this many times first.
-    ifbo_incumbent_exclusion_min_observations: int

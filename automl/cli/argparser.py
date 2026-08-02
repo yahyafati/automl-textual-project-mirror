@@ -37,7 +37,6 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     ifbo_incumbent_ensemble_top_k=3,
     ifbo_incumbent_ensemble_accuracy_threshold=0.05,
     ifbo_thaw_step=1,
-    ifbo_incumbent_exclusion_min_observations=2,
 )
 
 
@@ -151,14 +150,6 @@ def create_parser() -> argparse.ArgumentParser:
         "--ifbo-thaw-step",
         type=int,
         help="Number of steps to thaw each candidate in ifBO.",
-    )
-    parser.add_argument(
-        "--ifbo-incumbent-exclusion-min-observations",
-        type=int,
-        help="Minimum number of freeze-thaw observations the current "
-        "best-so-far ifBO candidate must have before it's excluded from "
-        "the acquisition competition (prevents it from monopolizing "
-        "trial budget). Default: 2.",
     )
 
     return parser
