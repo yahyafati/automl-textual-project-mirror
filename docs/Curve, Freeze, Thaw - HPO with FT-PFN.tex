@@ -201,17 +201,7 @@ matched seeds on \texttt{amazon}) traced why: once the incumbent-exclusion rule 
 the current best, every \emph{pending} candidate is a known quantity the surrogate confidently
 ranks below the now-frozen target --- but a never-observed candidate's predictive distribution
 under FT-PFN is wide/uncertain, which inflated its PI score against that same high threshold
-relative to an already-observed, confidently-mediocre pending candidate. Concretely, in
-\texttt{ifbo-greedy-seed36.jsonl} the eventual best configuration was found at trial 3 of 20
-and never selected again --- every subsequent exploitation round instead won by minting a new,
-never-tried candidate, none of which beat it either, so the run's reported best accuracy was
-capped at whatever that one candidate reached in its first two thaws (0.811). The matched
-\texttt{ifbo-random-seed36.jsonl} run, by contrast, kept refining its top two candidates via
-leapfrogging --- the incumbent-exclusion rule only walls off whichever candidate currently
-leads, so a runner-up overtaking it frees the original back up --- climbing all the way to
-0.878. New candidates now enter the pool strictly via the $\epsilon(t)$-floor draw or the
-empty-pending fallback above, so exploitation rounds are forced to spend their budget refining
-known candidates instead of chasing novelty.
+relative to an already-observed, confidently-mediocre pending candidate.
 
 \section*{Search space: the \texttt{sequence-dl} approach}
 
