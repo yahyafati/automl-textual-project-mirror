@@ -93,7 +93,7 @@ large quantities of \textbf{synthetic} learning-curve data sampled from a hand-d
 prior, and then used purely for inference at HPO time via \textit{in-context learning} — no
 weights are updated during the actual HPO run.
 
-The implementation follows **ifBO** as introduced in:
+The implementation follows \textbf{ifBO} as introduced in:
 \begin{quote}
 H. Rakotoarison, S. Adriaensen, N. Mallik, S. Garibov, E. Bergman, F. Hutter.
 \emph{In-Context Freeze-Thaw Bayesian Optimization for Hyperparameter Optimization.}
@@ -265,7 +265,7 @@ only sometimes differ per-approach):
 
     \item[\texttt{seq\_embed\_dim}] \hfill \\
     \textbf{Range:} $[32, 512]$ (log scale) \quad | \quad \textbf{Default:} $128$ \\
-    \textit{Rationale:} Token embedding dimensionality. Independent of any pretrained encoder's native hidden size on purpose{\color{red}{ --- see \texttt{seq\_pretrained\_model\_name} below for how a mismatch against the source embedding matrix is handled.}}
+    \textit{Rationale:} Token embedding dimensionality. Independent of any pretrained encoder's native hidden size on purpose
 
     \item[\texttt{seq\_num\_layers}] \hfill \\
     \textbf{Range:} $[1, 3]$ \quad | \quad \textbf{Default:} $1$ \\
