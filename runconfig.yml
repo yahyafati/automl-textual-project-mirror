@@ -31,7 +31,7 @@ ifbo_incumbent_ensemble_accuracy_threshold: 0.05
 # Each epoch samples stochastic_epoch_fraction of the training batches
 # instead of iterating the full dataset - cheaper epochs at the cost of
 # per-epoch dataset coverage. Off by default.
-stochastic_epochs: false
+stochastic_epochs: true
 stochastic_epoch_fraction: 0.5
 
 ifbo_thaw_step: 1
