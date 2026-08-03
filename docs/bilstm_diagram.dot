@@ -8,10 +8,10 @@ digraph BiLSTM {
     input [label="input_ids\n(B, L)", shape=oval, fillcolor="#E8EAF6", color="#3F51B5"];
     embed [label="Embedding\nvocab_size × embed_dim\npretrained warm-start", fillcolor="#E0F2F1", color="#00695C"];
     lstm [label="Bidirectional LSTM\nseq_num_layers × hidden_dim\npacked, ignores padding", fillcolor="#D1C4E9", color="#4527A0", shape=box3d];
-    attn [label="Attention pooling\nBahdanau-style, masked\nover every timestep", fillcolor="#FCE4EC", color="#C2185B"];
+    final [label="Final hidden state\nlast layer, both directions\nconcatenated (h_n)", fillcolor="#FCE4EC", color="#C2185B"];
     dropout [label="Dropout\np = dropout", fillcolor="#ECEFF1", color="#455A64"];
     fc [label="Linear\n→ num_classes", fillcolor="#FFCCBC", color="#BF360C"];
     output [label="logits\n(B, num_classes)", shape=oval, fillcolor="#E8EAF6", color="#3F51B5"];
 
-    input -> embed -> lstm -> attn -> dropout -> fc -> output;
+    input -> embed -> lstm -> final -> dropout -> fc -> output;
 }

@@ -211,7 +211,7 @@ competition.
 
 \section*{Search space: the \texttt{sequence-dl} approach}
 
-\texttt{sequence-dl} is a BiLSTM-with-attention text classifier trained \textbf{from scratch} --- no fine-tuning of a pretrained
+\texttt{sequence-dl} is a BiLSTM text classifier trained \textbf{from scratch} --- no fine-tuning of a pretrained
 encoder --- so its search space has to cover both generic optimization knobs and the
 architecture of a recurrent encoder built from nothing. $\Lambda_\text{sequence-dl}$ splits into
 two groups: hyperparameters shared with \texttt{transformer} and hyperparameters specific to the BiLSTM.
@@ -255,7 +255,7 @@ only sometimes differ per-approach):
 \begin{description}
     \item[\texttt{hidden\_dim}] \hfill \\
     \textbf{Range:} $[32, 256]$ (log scale) \quad | \quad \textbf{Default:} $128$ \\
-    \textit{Rationale:} LSTM hidden size per direction (the model is always bidirectional, so the pooled representation is $2\times$ this).
+    \textit{Rationale:} LSTM hidden size per direction (the model is always bidirectional, so the final hidden representation fed to the classifier is $2\times$ this).
 
     \item[\texttt{learning\_rate}] \hfill \\
     \textbf{Range:} $[10^{-4}, 10^{-2}]$ (log scale) \quad | \quad \textbf{Default:} $10^{-3}$ \\
@@ -278,8 +278,8 @@ only sometimes differ per-approach):
 \end{description}
 
 The diagram below shows \texttt{BiLSTMClassifier}'s data flow (\texttt{automl/core/approaches/sequence\_dl.py}):
-a warm-started embedding, a bidirectional LSTM sized by \texttt{hidden\_dim}/\texttt{seq\_num\_layers}, additive
-(Bahdanau-style) attention pooling over every timestep rather than just the final hidden state,
+a warm-started embedding, a bidirectional LSTM sized by \texttt{hidden\_dim}/\texttt{seq\_num\_layers}, the final
+hidden state of the last layer (both directions concatenated) rather than any pooling over timesteps,
 then dropout and a linear classifier.
 
 \begin{figure}[htbp]
