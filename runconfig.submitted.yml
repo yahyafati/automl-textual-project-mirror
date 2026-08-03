@@ -8,7 +8,7 @@ evaluation_budget: 30
 max_budget: 10
 min_budget: 3
 n_trials: 20
-optimizer: ifbo  # use rl_freeze_thaw for the PPO Freeze--Thaw scheduler
+optimizer: ifbo
 
 approach: sequence-dl
 #device: cpu

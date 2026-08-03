@@ -379,7 +379,7 @@ class TorchTrainer(Trainer):
         load_path: Optional[Path] = None,
         save_path: Optional[Path] = None,
     ) -> TrainResult:
-        logger.debug(f"Starting training pipeline (epochs={self.epochs})...")
+        logger.info(f"Starting training pipeline (epochs={self.epochs})...")
         if load_path:
             self.load(load_path)
 
