@@ -48,22 +48,10 @@ class Optimizer(ABC):
         self.logger.info(f"Selected seed: {runtime_config['seed']}")
         self.logger.info(f"Current runtime_id: {runtime_config['runtime_id']}")
 
-        # `self.devices` is the full pool of devices available for
-        # concurrent trial execution (see IfboOptimizer's parallel-trial
-        # loop); `self.device` stays as the single "default" device so
-        # every existing single-device call site keeps working unchanged.
         self.devices: list[torch.device] = self._resolve_devices(runtime_config)
         self.device = self.devices[0]
 
-        # Guards shared mutable state (self.history, self.trial_no,
-        # self.best_val_error, self.highest_budget_seen, the "best"
-        # checkpoint) when multiple trials run concurrently across
-        # threads. A no-op (uncontended) when only one trial runs at a
-        # time, so it's always safe to hold.
         self._state_lock = threading.Lock()
-        # Per-config-id locks, created lazily under `_state_lock`, so two
-        # concurrent trials that happen to share a config hash don't
-        # corrupt each other's trainer checkpoint file.
         self._checkpoint_locks: dict[str, threading.Lock] = {}
 
         self.dataset = get_dataset_class(runtime_config["dataset"])(
@@ -595,17 +583,6 @@ class Optimizer(ABC):
             stochastic_epoch_fraction=self.runtime_config["stochastic_epoch_fraction"],
         )
 
-        # Retraining runs for the full `evaluation_budget` regardless of where
-        # accuracy peaks, so without checkpointing the best epoch here,
-        # `predict()` below would run on whatever (possibly overfit/degraded)
-        # weights the final epoch happens to leave behind, while
-        # `train_result["val_accuracy"]` would keep reporting the earlier
-        # peak -- silently mismatching what's actually predicted.
-        #
-        # Derived from `state_dict_filename` (already unique per incumbent
-        # when called in a loop over an ensemble -- see `_finalize_optimization`)
-        # rather than a fixed name, so concurrent/ensemble calls don't clobber
-        # each other's best-epoch checkpoint.
         best_ckpt_path = self.checkpoint_dir / f"{Path(state_dict_filename).stem}_eval_best.pt"
 
         with approach.with_mode("eval") as _approach:
