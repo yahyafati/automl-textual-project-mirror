@@ -551,6 +551,80 @@ quality early and never needed to push it further.
 
 \subsection*{Final Submission Results}
 
+Each row below is one flagship \texttt{ifbo} run (greedy candidate selection,
+\texttt{approach=sequence-dl}, \texttt{seed=67}, \texttt{n\_trials=20},
+\texttt{min\_budget=3}/\texttt{max\_budget=10} epochs, \texttt{evaluation\_budget=30}) --- raw
+artifacts for each are under
+\texttt{actual.ignore.results/}\allowbreak\texttt{<dataset>/}\allowbreak\texttt{<runtime\_id>/}.
+AG News and DBpedia ran on a Linux box with 2$\times$ NVIDIA Tesla T4 GPUs (2 parallel trials);
+Amazon and IMDB ran locally on an Apple M2 Max over MPS (1 parallel trial, no second GPU to
+parallelize onto) --- confirmed via each run's \texttt{device\_info.json}. Yelp has no run under
+\texttt{actual.ignore.results} (only older, pre-\texttt{incumbent.json} runs under
+\texttt{results/yelp/}), so it can't be broken down the same way here.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Dataset} & \textbf{Device} & \textbf{Parallel} & \textbf{Search epochs} & \textbf{Retrain epochs} & \textbf{Total wall time} \\
+\midrule
+AG News  & 2$\times$ T4 (CUDA)  & 2 & 105 & 30 & 9m 20s \\
+Amazon   & M2 Max (MPS)         & 1 & 94  & 30 & 1h 51m \\
+DBpedia  & 2$\times$ T4 (CUDA)  & 2 & 96  & 30 & 1h 38m \\
+IMDB     & M2 Max (MPS)         & 1 & 99  & 30 & 1h 38m \\
+\bottomrule
+\end{tabular}
+\caption{Per-dataset device and timing for the flagship submission run. ``Search epochs'' sums
+the epoch budget actually trained across all 20 HPO trials; ``Retrain epochs'' is the fixed
+\texttt{evaluation\_budget} the incumbent is retrained for afterward; ``Total wall time'' is the
+full pipeline (search + retrain + plotting), from each run's \texttt{app.log}.}
+\end{table}
+
+DBpedia ran on the \emph{same} dual-GPU machine as AG News yet took over $10\times$ longer (1h38m
+vs.\ 9m20s) --- hardware is not what dominates total time here, dataset scale is (DBpedia's
+held-out test split alone is 70{,}000 rows across 14 classes, vs.\ AG News's 7{,}600 rows / 4
+classes). A naive ``GPU vs.\ Apple Silicon'' story would be misleading on its own.
+
+\paragraph{A checkpoint-restore bug found while pulling these numbers.}
+\texttt{evaluate\_incumbent()} (\texttt{base\_optimizer.py}) retrains the incumbent for the full
+\texttt{evaluation\_budget} (30 epochs), and \texttt{TorchTrainer.train()} tracks the
+\emph{best} epoch's validation accuracy against the held-out test split (used as ``validation''
+for this retrain) --- but, prior to this fix, never checkpointed or restored that best epoch's
+\emph{weights}: it kept training to epoch 30 regardless, and \texttt{predict()} then ran on
+whatever the \emph{final} epoch left behind. Checking the four datasets' actual submitted
+\texttt{predictions.npy} against the true labels stored alongside them in \texttt{incumbent.json}
+confirmed the model peaks in the first 2--4 of 30 epochs on every dataset and visibly degrades
+afterward, so the accuracy actually reflected in what was submitted was lower than what the run
+reported as its ``Test Accuracy'':
+
+\begin{center}
+\begin{tabular}{lccc}
+\hline
+Dataset & Best epoch & Reported (best-epoch) accuracy & Actual submitted-\texttt{predictions.npy} accuracy \\
+\hline
+AG News  & 4/30 & 91.28\% & 90.42\% \\
+Amazon   & 3/30 & 82.33\% & 79.73\% \\
+DBpedia  & 4/30 & 98.77\% & 98.69\% \\
+IMDB     & 2/30 & 84.16\% & 81.71\% \\
+\hline
+\end{tabular}
+\end{center}
+
+The fix: \texttt{SequenceDLApproach.train()} / \texttt{TransformerApproach.train()} now accept
+and forward a \texttt{save\_path}, and \texttt{evaluate\_incumbent()} passes one so the trainer's
+existing on-new-best checkpointing (already implemented, just never wired up here) actually
+fires, then reloads that checkpoint into the model before calling \texttt{predict()}. Verified
+with an isolated smoke test (tiny synthetic slice, aggressive LR to force the same
+early-peak-then-decay pattern): before the fix, \texttt{predict()} accuracy matched the
+\emph{final} epoch (61.67\%) despite a best epoch of 65.00\%; after the fix, it matches the
+\emph{best} epoch (65.00\%) exactly. The freeze-thaw HPO loop itself is unaffected --- it always
+tracked its own best-so-far checkpoint separately and never depended on this path.
+
+\textbf{The table below is the run \emph{as actually submitted}, i.e.\ still reflects the
+pre-fix, final-epoch predictions for AG News/Amazon/DBpedia/IMDB --- it has not been rerun with
+the fix applied.} Yelp's accuracy can't be independently checked this way (no local ground
+truth for the held-out exam set), so it's unknown whether it's affected the same way.
+
 \begin{center}
 \begin{tabular}{lccc}
 \hline

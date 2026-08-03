@@ -254,6 +254,7 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
         prepared_result,
         epochs: int = 10,
         load_path: Optional[Path] = None,
+        save_path: Optional[Path] = None,
         evaluate_validation=True,
         max_time_seconds: Optional[float] = None,
         **kwargs,
@@ -307,7 +308,7 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
         assert self.trainer is not None
         result = self.trainer.train(
             load_path=load_path,
-            save_path=None,
+            save_path=save_path,
         )
         logger.info(f"[{self.name}] train() finished after {epochs} epoch(s).")
         return result

@@ -595,11 +595,34 @@ class Optimizer(ABC):
             stochastic_epoch_fraction=self.runtime_config["stochastic_epoch_fraction"],
         )
 
+        # Retraining runs for the full `evaluation_budget` regardless of where
+        # accuracy peaks, so without checkpointing the best epoch here,
+        # `predict()` below would run on whatever (possibly overfit/degraded)
+        # weights the final epoch happens to leave behind, while
+        # `train_result["val_accuracy"]` would keep reporting the earlier
+        # peak -- silently mismatching what's actually predicted.
+        #
+        # Derived from `state_dict_filename` (already unique per incumbent
+        # when called in a loop over an ensemble -- see `_finalize_optimization`)
+        # rather than a fixed name, so concurrent/ensemble calls don't clobber
+        # each other's best-epoch checkpoint.
+        best_ckpt_path = self.checkpoint_dir / f"{Path(state_dict_filename).stem}_eval_best.pt"
+
         with approach.with_mode("eval") as _approach:
             prepared = _approach.prepare(train_split, test_split)
             train_result = _approach.train(
-                prepared, epochs=epochs, evaluate_validation=should_evaluate
+                prepared,
+                epochs=epochs,
+                evaluate_validation=should_evaluate,
+                save_path=best_ckpt_path if should_evaluate else None,
             )
+            if should_evaluate and best_ckpt_path.exists():
+                self.logger.info(
+                    f"[{self.__class__.__name__}] Restoring best-epoch checkpoint "
+                    f"(val_accuracy={train_result['val_accuracy']:.4f}) before "
+                    f"final prediction."
+                )
+                _approach.trainer.load(best_ckpt_path)
             self.logger.info("Predicting for test set")
             prediction_result = _approach.predict(test_df)
 
