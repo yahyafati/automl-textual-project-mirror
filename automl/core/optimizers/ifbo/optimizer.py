@@ -1,14 +1,3 @@
-"""
-In-Context Freeze-Thaw Bayesian Optimization (ifBO) optimizer.
-
-- Dynamically samples candidate configurations from ConfigSpace.
-- Uses the FT-PFN surrogate (ifbo.FTPFN) to schedule which configuration
-  to "thaw" next and at which (future) horizon, following MFPI-random.
-- Each step corresponds to one call to `train_single_configuration`.
-- Hyperparameters are encoded into [0,1]^d for FT-PFN using a simple
-  type-aware scheme (float/int/log/categorical).
-"""
-
 from __future__ import annotations
 
 import gc
@@ -60,19 +49,13 @@ class IfboOptimizer(Optimizer):
                 f"min_budget ({self.min_budget}) for freeze-thaw."
             )
 
-        # Number of discrete freeze-thaw steps per configuration
-        # step 1 -> budget = min_budget
-        # step b_max -> budget = max_budget
         self.b_max: int = self.max_budget - self.min_budget + 1
 
         # Build encoder for ConfigSpace -> [0,1]^d
         self.hp_space: HyperparameterSpace = self._build_hp_space(self.space)
 
         # Probability of exploring by sampling a new candidate.
-        # The actual epsilon decays with the number of completed trials.
-        self.initial_epsilon: float = float(
-            runtime_config.get("ifbo_initial_epsilon", 1.0)
-        )
+        self.initial_epsilon: float = 1.0
         if not 0.0 <= self.initial_epsilon <= 1.0:
             raise ValueError(
                 "[IfboOptimizer] ifbo_initial_epsilon must be in [0, 1], "
@@ -129,36 +112,11 @@ class IfboOptimizer(Optimizer):
         self.logger.info("[IfboOptimizer] Loading pretrained FT-PFN surrogate...")
         self.model = FTPFN(version="0.0.1", target_path=".model")
 
-        # Assigns each freshly-sampled candidate a stable identity,
-        # independent of its (mutable, tensor-valued) fields, so a
-        # parallel batch can dedupe candidates via a plain `set[int]`
-        # instead of the (unhashable) candidate object itself.
         self._uid_counter = itertools.count()
 
-        # Number of trials to run concurrently, one per device (or
-        # round-robin across `self.devices` if this exceeds the visible
-        # device count - fine since these models are tiny). Defaults to 1
-        # = today's fully sequential behavior.
         self._parallelism: int = max(
             1, int(runtime_config.get("num_parallel_trials", 1))
         )
-        # DataLoader(num_workers>0) spawns its worker subprocesses via
-        # os.fork() on the platform default ("fork") multiprocessing
-        # context (i.e. on Linux - macOS/Windows default to "spawn",
-        # which doesn't call os.fork() at all). filelock (Python 3.12+)
-        # actively refuses to let a fork happen while *any* FileLock in
-        # the process is mid-acquire/release - and with several trials
-        # running concurrently, one thread can easily be inside
-        # `_append_trial_to_jsonl`'s FileLock exactly when another
-        # thread's DataLoader tries to fork, raising "os.fork is unsafe
-        # while filelock is changing descriptor ownership". Rather than
-        # just dividing the worker count down (which still forks, just
-        # less often), force it to 0 whenever trials run concurrently -
-        # data loading stays in each trial's own thread instead, which
-        # sidesteps forking (and this whole class of issue) entirely.
-        # Tokenization already happens once upfront in
-        # TextSequenceDataset.__init__, not per-batch, so the throughput
-        # cost of losing DataLoader workers here is small.
         self._effective_num_workers: int = (
             0 if self._parallelism > 1 else int(runtime_config["num_workers"])
         )
@@ -194,11 +152,6 @@ class IfboOptimizer(Optimizer):
                 _load_pretrained_word_embeddings,
             )
 
-            # `seq_pretrained_model_name` is HPO-tunable (see
-            # configspacehelper.build_config_space), so prewarm every choice
-            # it could sample rather than just one, to avoid the same
-            # download/load race for whichever choice the first parallel
-            # batch happens to draw.
             for model_name in SequenceDLApproach.MODEL_NAME_CHOICES:
                 _load_pretrained_word_embeddings(
                     os.path.join(SequenceDLApproach.MODELS_DIR, model_name)
@@ -209,11 +162,6 @@ class IfboOptimizer(Optimizer):
 
             from automl.core.approaches.transformer import TransformerApproach
 
-            # `transformer_model_name` is HPO-tunable (see
-            # configspacehelper.build_config_space), so prewarm every choice
-            # it could sample rather than just one, to avoid the same
-            # download/load race for whichever choice the first parallel
-            # batch happens to draw.
             for model_name in TransformerApproach.MODEL_NAME_CHOICES:
                 AutoModel.from_pretrained(model_name)
 
@@ -294,14 +242,11 @@ class IfboOptimizer(Optimizer):
 
     def _epsilon(self, completed_trials: int) -> float:
         r"""
-        Decaying exploration probability.
+        Polynomial decay of exploration rate ε from initial_epsilon to eps_min.
 
-        completed_trials is the number of already executed calls to
-        train_single_configuration. With the default initial_epsilon=1.0 this
-        yields 1.0, 0.5, 0.333..., ... for completed_trials 0, 1, 2, ...
+        ε(t) = ε_min + (ε_0 - ε_min) * (1 - t / T)^p
 
-        Polynomial Decay:
-        e_t = e_min + (e_0 - e_min) * (1 - t/T)^p
+        where t = completed_trials and T = total_steps.
         """
         eps_min = 0.05
         p = 2.0
@@ -345,36 +290,12 @@ class IfboOptimizer(Optimizer):
         device: Optional[torch.device] = None,
         num_workers: Optional[int] = None,
     ) -> None:
-        """
-        Thaw `cand` for one or more freeze-thaw steps:
-        - Increase its step counter
-        - Train for the corresponding epoch budget
-        - Record one (t, y) observation *per epoch actually trained* in
-          this call, using that epoch's own validation accuracy - not
-          just one point for the whole call using the best accuracy seen
-          across the run. `TorchTrainer` already computes a per-epoch
-          accuracy for every epoch it trains
-          (`result["history"]`/`EpochResult.val_accuracy`); collapsing
-          that into a single running-max value would (a) throw away real
-          curve density whenever this call spans more than one epoch,
-          and (b) feed FT-PFN an artificially non-decreasing curve that
-          hides genuine degradation (e.g. overfitting) between epochs,
-          which is exactly the kind of "breaking point" curve shape the
-          surrogate is meant to reason about (see docs/IFBO_METHOD.md).
-
-        `device`/`num_workers` are forwarded to `train_single_configuration`
-        so a parallel batch can run several `_step` calls concurrently,
-        each pinned to its own device (see `_perform_ifbo`).
-        """
         prev_budget = (
             self._step_to_budget(cand.steps_done) if cand.steps_done > 0 else 0
         )
         cand.steps_done = min(cand.steps_done + self._thaw_step, self.b_max)
         budget = self._step_to_budget(cand.steps_done)
 
-        # Derive a seed for this evaluation (for reproducibility yet
-        # variability). `self._rng` is shared process-wide, so guard the
-        # draw itself when multiple `_step` calls may run concurrently.
         with self._state_lock:
             seed = self._rng.randint(1, 2**31 - 1)
 
@@ -386,11 +307,6 @@ class IfboOptimizer(Optimizer):
             num_workers=num_workers,
         )
 
-        # Epochs newly trained this call, restricted to epoch >= min_budget:
-        # epochs below that floor only exist because the very first call
-        # trains straight through to min_budget in one shot, and they don't
-        # correspond to any step on the {1, ..., b_max} grid `t` is defined
-        # over (min_budget IS step 1).
         new_epochs = [
             e
             for e in epoch_history
@@ -398,9 +314,6 @@ class IfboOptimizer(Optimizer):
         ]
 
         if not new_epochs:
-            # Training failed outright (no history) or this call made no
-            # progress past the fidelity floor - fall back to a single
-            # observation at this call's target step, as before.
             y = float("nan") if math.isnan(val_error) else 1.0 - float(val_error)
             cand.ts.append(cand.steps_done / self.b_max)
             cand.ys.append(y)
@@ -445,39 +358,6 @@ class IfboOptimizer(Optimizer):
         completed_trials: int,
         exclude: Optional[set[int]] = None,
     ) -> _IfBOCandidate:
-        """
-        Dynamic epsilon-greedy MFPI-random acquisition:
-
-        - If the candidate list is empty, sample a new candidate.
-        - Otherwise, with probability epsilon, force-sample a brand new
-          candidate unconditionally (guaranteed exploration floor,
-          independent of the surrogate). This is the *only* way new
-          candidates enter the pool once it's non-empty (see below).
-        - Otherwise (probability 1 - epsilon), score the pending existing
-          candidates using PI(T_rand) and select among them only - no
-          freshly-sampled candidate competes in this round. An earlier
-          version also threw a freshly-sampled, not-yet-pooled candidate
-          into this competition (added to `self.candidates` if it won),
-          meant to let exploitation rounds surface genuinely new regions
-          of the space too. In practice this backfired: a never-observed
-          candidate's predictive distribution under FT-PFN is wide/
-          uncertain, which inflates its PI score against a high threshold
-          relative to an already-observed candidate the surrogate is
-          confident is mediocre.
-        - Sample a random future horizon h_rand in {1, ..., b_max}.
-        - Sample a random target T_rand above current best accuracy.
-        - For each pending candidate, query FT-PFN at time
-          t' = (steps_done + h_rand)/b_max.
-        - Then advance the selected candidate by h_rand freeze-thaw steps.
-
-        `exclude` holds `uid`s of candidates already picked earlier in the
-        same parallel batch (see IfboOptimizer's parallel-trial loop) -
-        excluding them prevents two concurrently-running trials from
-        thawing the very same candidate at once, which would race on its
-        `.steps_done`/`.ts`/`.ys` mutation and its trainer checkpoint file.
-        Newly-sampled candidates never need this check since each gets a
-        fresh, unique `uid`.
-        """
         if not self.candidates:
             self.logger.debug("No Candidates, sampling a new one.")
             candidate = self._sample_new_candidate()
@@ -670,16 +550,6 @@ class IfboOptimizer(Optimizer):
     def _perform_ifbo_parallel(
         self,
     ) -> Optional[Configuration | list[Configuration]]:
-        """
-        Batch-synchronous variant of `_perform_ifbo_sequential`: each round
-        selects up to `self._parallelism` *distinct* candidates using the
-        context built from the latest completed state (candidates 2..N
-        within a round are picked against the same context as candidate 1
-        - standard batch-BO staleness, not a bug), dispatches them
-        concurrently across `self.devices` (round-robin if
-        `self._parallelism` exceeds the device count), and waits for the
-        whole round before building the next context.
-        """
         used_steps = 0
 
         with ThreadPoolExecutor(max_workers=self._parallelism) as executor:
@@ -735,23 +605,11 @@ class IfboOptimizer(Optimizer):
                                 exc_info=True,
                             )
                 except KeyboardInterrupt:
-                    # SIGINT only reaches the main thread; in-flight GPU
-                    # work in this round still has to finish (threads
-                    # can't be force-killed), but drop anything not yet
-                    # started so we don't queue further rounds.
                     executor.shutdown(wait=False, cancel_futures=True)
                     raise
 
                 used_steps += len(batch)
 
-                # --- MEMORY CLEANUP: once per round, not once per trial ---
-                # This runs on the main thread, which never calls
-                # `torch.cuda.set_device(...)`, so its "current device" stays
-                # whatever it defaults to (cuda:0) - a plain, unscoped
-                # `torch.cuda.empty_cache()` here would only ever release
-                # cuda:0's cache, leaving every other device's allocator to
-                # accumulate reserved/fragmented memory for the whole run.
-                # Explicitly loop over every device trials were dispatched to.
                 gc.collect()
                 if torch.cuda.is_available():
                     for d in self.devices:

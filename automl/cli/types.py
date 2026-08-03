@@ -22,13 +22,6 @@ class RuntimeConfig(TypedDict):
     min_budget: int
     n_trials: int
 
-    # Wall-clock cap (in seconds) on a single trial's training call
-    # (`train_single_configuration`/`Approach.train`). `None` disables the
-    # cap (today's behavior). Checked once per epoch boundary, so training
-    # stops at the first epoch boundary at/after the deadline rather than
-    # being preempted mid-epoch. Primarily useful under `ifbo`, where the
-    # freeze-thaw scheduler can pick ever-larger epoch budgets for a
-    # candidate and a single trial could otherwise run arbitrarily long.
     max_trial_time_seconds: Optional[float]
 
     max_num_rows: int
@@ -38,22 +31,11 @@ class RuntimeConfig(TypedDict):
     num_workers: int
     optimizer: str
 
-    # If False, skip retraining/evaluating the incumbent on held-out test
-    # data after optimization finishes (no predictions.npy / incumbent.json
-    # produced). Useful when only the HPO search history is wanted, e.g.
-    # before running train_top_k_from_history.py separately. Default: True.
     evaluate_incumbent: bool
 
-    # If True, each training epoch samples a random fraction of the
-    # training batches (see `stochastic_epoch_fraction`) instead of
-    # iterating the full dataset - trades per-epoch dataset coverage for
-    # cheaper, more numerous epochs under a fixed epoch budget.
     stochastic_epochs: bool
     stochastic_epoch_fraction: float
 
-    # Number of ifBO trials to run concurrently (one per device, or
-    # round-robin across devices if this exceeds the number of visible
-    # GPUs). Defaults to 1 = today's fully sequential behavior.
     num_parallel_trials: int
 
     log_level: str

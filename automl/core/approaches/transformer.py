@@ -35,10 +35,6 @@ def _freeze_base_by_ratio(base: nn.Module, freeze_ratio: float) -> None:
     `0.5` freezes the embeddings plus the lower half of the blocks.
     """
     if freeze_ratio >= 1.0:
-        # Freeze every parameter outright, including ones not covered by
-        # the unit list below (e.g. BERT's pooler) - "1.0" should mean
-        # linear-probing with a fully-fixed base, not "everything the unit
-        # list happens to enumerate."
         for param in base.parameters():
             param.requires_grad_(False)
         return
@@ -88,13 +84,6 @@ class TransformerClassifier(nn.Module):
         if freeze_ratio > 0.0:
             _freeze_base_by_ratio(self.base, freeze_ratio)
         hidden_size = self.base.config.hidden_size
-        # A small MLP head (Linear -> GELU -> LayerNorm -> Dropout ->
-        # Linear) instead of a bare `Dropout -> Linear` on top of the CLS
-        # token: the extra projection gives the head room to reshape the
-        # pretrained representation for the target task, and the LayerNorm
-        # keeps that projection's output well-scaled - useful in particular
-        # when `freeze_ratio` is high and the head is doing most of the
-        # adapting.
         self.pre_classifier = nn.Linear(hidden_size, hidden_size)
         self.activation = nn.GELU()
         self.layer_norm = nn.LayerNorm(hidden_size)
@@ -106,9 +95,6 @@ class TransformerClassifier(nn.Module):
         last_hidden_state = self.base(
             input_ids=input_ids, attention_mask=attention_mask
         ).last_hidden_state
-        # CLS-token pooling: the shared tokenizer prepends [CLS] to every
-        # sequence (see `text_encoding.truncate_ids`'s docstring), so
-        # position 0 always holds it, regardless of truncation.
         cls_hidden = last_hidden_state[:, 0, :]
         pooled = self.layer_norm(self.activation(self.pre_classifier(cls_hidden)))
         return self.classifier(self.dropout(pooled))
@@ -123,8 +109,6 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
 
     TOKENIZERS_DIR = "./tokenizers"
     DEFAULT_MODEL_NAME = "google/bert_uncased_L-4_H-512_A-8"
-    # Vendored locally under TOKENIZERS_DIR (see save_tokenizer.py); the
-    # `transformer_model_name` hyperparameter picks between these.
     MODEL_NAME_CHOICES = (
         "distilbert-base-uncased",
         "bert-base-uncased",
@@ -208,9 +192,6 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
         )
         self._sep_token_id = self.tokenizer.sep_token_id
 
-        # Encode once per unique text (cached across trials, see
-        # `encode_texts_cached`); only truncation to this trial's
-        # `max_seq_len` happens below, in `TextSequenceDataset`.
         train_full_ids = encode_texts_cached(
             train_texts, self.tokenizer, tokenizer_path
         )

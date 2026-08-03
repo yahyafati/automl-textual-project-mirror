@@ -50,17 +50,12 @@ class RandomSearch(Optimizer):
 
         try:
             for i in range(n_trials):
-                # Uniform random configuration from ConfigSpace
                 config: Configuration = self.space.sample_configuration()
                 self.logger.info(
                     f"[RandomOptimizer] Trial {i + 1}: Sampled configuration: {config}"
                 )
 
-                # Here we simply use max_budget every time.
-                # If you want varying budgets, you could sample uniformly between min and max.
                 budget = max_budget
-
-                # Seed per trial (optional: use global seed + i)
                 seed = self.runtime_config["seed"] + i
 
                 val_error = self._train_fn(config=config, seed=seed, budget=budget)
@@ -69,7 +64,6 @@ class RandomSearch(Optimizer):
                     self.best_val_error = val_error
                     self._best_config = config
 
-            # After the loop, save incumbent and evaluate
             if self._best_config is not None:
                 self.evaluate_incumbent(self._best_config)
 

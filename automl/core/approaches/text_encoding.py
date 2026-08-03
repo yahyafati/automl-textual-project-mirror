@@ -55,8 +55,6 @@ def load_tokenizer(path: str) -> PreTrainedTokenizerBase:
     return cached
 
 
-# Full (untruncated) per-text encodings, cached by tokenizer path so they
-# survive across HPO trials. Keyed by tokenizer path -> {text: input_ids}.
 _full_encoding_cache: dict[str, dict[str, list[int]]] = {}
 _full_encoding_cache_lock = threading.Lock()
 
@@ -168,30 +166,10 @@ class TextSequenceDataset(torch.utils.data.Dataset):
         max_seq_len: int,
         sep_token_id: Optional[int] = None,
     ):
-        # `full_input_ids` is already tokenized (see `encode_texts_cached`),
-        # fully untruncated and WITHOUT attention_mask / token_type_ids -
-        # only input_ids is ever used downstream, so keeping the other two
-        # fields around wastes roughly 2/3 of the memory this dataset used
-        # to hold. Truncation to this trial's `max_seq_len` happens here,
-        # per-sample, so the same cached full encoding can be reused by
-        # every trial regardless of its sampled `max_seq_length`.
         input_ids_list = [
             truncate_ids(ids, max_seq_len, sep_token_id) for ids in full_input_ids
         ]
 
-        # Store every sequence back-to-back in ONE contiguous int32 buffer
-        # (+ offsets) rather than as a Python list of per-sample tensors.
-        # Two separate wins:
-        #  1. int32 instead of int64 halves the raw storage size (vocab
-        #     sizes like distilbert's ~30k fit comfortably in int32; we
-        #     upcast to int64 lazily, per-sample, only when a batch is
-        #     actually read).
-        #  2. A single tensor (vs. a Python list/list-of-tensors) avoids
-        #     the classic PyTorch DataLoader multiprocessing pitfall where
-        #     touching many individual Python objects' refcounts in worker
-        #     processes forces the OS to copy-on-write pages that were
-        #     otherwise shared with the parent process, silently
-        #     multiplying memory usage by ~num_workers.
         lengths = torch.tensor([len(ids) for ids in input_ids_list], dtype=torch.long)
         self.offsets = torch.cat([torch.zeros(1, dtype=torch.long), lengths.cumsum(0)])
         self.input_ids = (
@@ -202,10 +180,6 @@ class TextSequenceDataset(torch.utils.data.Dataset):
         self._len = len(input_ids_list)
 
         if labels is not None:
-            # Precompute the label tensor once (mapping NaN -> mask value)
-            # instead of storing a raw Python list and re-checking
-            # `pd.isna` on every __getitem__ call. This also removes the
-            # same copy-on-write risk described above for the label list.
             label_series = pd.Series(labels)
             filled = label_series.fillna(self.DEFAULT_LABEL_MASK).astype("int64")
             self.labels = torch.from_numpy(filled.to_numpy().copy())

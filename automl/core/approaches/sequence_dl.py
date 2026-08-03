@@ -129,23 +129,11 @@ class BiLSTMClassifier(nn.Module):
         self.dropout = nn.Dropout(dropout)
         directions = 2 if bidirectional else 1
         attn_dim = hidden_dim * directions
-        # Additive (Bahdanau-style) attention over every timestep's output,
-        # replacing classification off only the final hidden state: for
-        # longer reviews the decisive sentiment cue is often mid-text, not
-        # at the last token, so pooling over the whole sequence gives the
-        # classifier access to signal the final-state-only approach threw
-        # away.
         self.attn_w = nn.Linear(attn_dim, attn_dim)
         self.attn_v = nn.Linear(attn_dim, 1, bias=False)
         self.fc = nn.Linear(attn_dim, num_classes)
 
     def forward(self, input_ids):
-        # Derive real sequence lengths from padding and pack the batch
-        # before running the LSTM. Previously the LSTM ran (and stored
-        # activations for backprop) over every padded position too - with
-        # a large max_seq_length and mostly-short texts, that's a lot of
-        # wasted compute and, more importantly, wasted autograd memory.
-        # Packing skips padded positions entirely in both directions.
         lengths = (input_ids != self.embedding.padding_idx).sum(dim=1).clamp(min=1)
 
         emb = self.embedding(input_ids)  # (B, L, E)
@@ -153,24 +141,20 @@ class BiLSTMClassifier(nn.Module):
             emb, lengths.cpu(), batch_first=True, enforce_sorted=False
         )
         packed_out, _ = self.lstm(packed)
-        # total_length restores the batch's original padded width (packing
-        # can otherwise trim trailing padding shared by every sequence in
-        # the batch), so the mask below lines up position-for-position with
-        # `input_ids`.
         outputs, _ = pad_packed_sequence(
             packed_out, batch_first=True, total_length=input_ids.size(1)
-        )  # (B, L, H*D)
+        )
 
         mask = torch.arange(outputs.size(1), device=outputs.device)[None, :] < lengths[
             :, None
         ].to(outputs.device)
-        scores = self.attn_v(torch.tanh(self.attn_w(outputs))).squeeze(-1)  # (B, L)
+        scores = self.attn_v(torch.tanh(self.attn_w(outputs))).squeeze(-1)
         scores = scores.masked_fill(~mask, float("-inf"))
-        weights = torch.softmax(scores, dim=1)  # (B, L)
-        context = torch.bmm(weights.unsqueeze(1), outputs).squeeze(1)  # (B, H*D)
+        weights = torch.softmax(scores, dim=1)
+        context = torch.bmm(weights.unsqueeze(1), outputs).squeeze(1)
 
         context = self.dropout(context)
-        logits = self.fc(context)  # (B, num_classes)
+        logits = self.fc(context)
         return logits
 
 
@@ -180,11 +164,6 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
     TOKENIZERS_DIR = "./tokenizers"
     MODELS_DIR = "./models"
     DEFAULT_MODEL_NAME = "distilbert-base-uncased"
-    # Vendored locally under TOKENIZERS_DIR (see save_tokenizer.py); the
-    # `seq_pretrained_model_name` hyperparameter picks between these.
-    # Tokenizer and embedding source are always the same model, since the
-    # BiLSTM's vocab indices must line up with whichever embedding matrix
-    # warm-starts it.
     MODEL_NAME_CHOICES = (
         "distilbert-base-uncased",
         "bert-base-uncased",
@@ -277,9 +256,6 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         )
         self._sep_token_id = self.tokenizer.sep_token_id
 
-        # Encode once per unique text (cached across trials, see
-        # `encode_texts_cached`); only truncation to this trial's
-        # `max_seq_len` happens below, in `TextSequenceDataset`.
         train_full_ids = encode_texts_cached(
             train_texts, self.tokenizer, self._tokenizer_path
         )
@@ -339,9 +315,6 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             f"num_classes={self._num_classes}, num_params={num_params}, "
             f"device={self._device.type}."
         )
-
-        # Trainer
-        # epochs = self.get_param_value("epochs")
 
         return {
             "train_loader": train_loader,
@@ -459,24 +432,15 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         for batch in loader:
             x, y = batch
             x = x.to(self._device, non_blocking=True)
-            # `y` is only ever compared/concatenated on CPU later - it never
-            # needs to touch the GPU at all, so we no longer copy it there.
 
             logits = self.model(x)
             preds = torch.argmax(logits, dim=-1)
 
-            # Move each batch's predictions to CPU immediately instead of
-            # letting a list of GPU-resident tensors grow for the entire
-            # pass. For large prediction sets this bounds peak GPU memory
-            # to ~one batch instead of the whole dataset.
             all_preds.append(preds.cpu())
             all_labels.append(y)
 
-        # One GPU -> CPU transfer per batch, already done above.
         y_pred = torch.cat(all_preds).numpy()
         y_true = torch.cat(all_labels).numpy()
-
-        # y_pred_orig = self.label_encoder.inverse_transform(y_pred)
 
         logger.debug(f"[{self.name}] predict(): produced {len(y_pred)} prediction(s).")
 

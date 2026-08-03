@@ -39,7 +39,7 @@ class TorchTrainer(Trainer):
         "rmsprop": torch.optim.RMSprop,
     }
 
-    SCHEDULER_MAPPING: dict[str, type[_LRScheduler]] = {
+    SCHEDULER_MAPPING: dict[str, type[StepLR | CosineAnnealingLR | ExponentialLR | ReduceLROnPlateau]] = {
         "steplr": StepLR,
         "cosineannealinglr": CosineAnnealingLR,
         "exponentiallr": ExponentialLR,

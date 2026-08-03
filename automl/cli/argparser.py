@@ -129,9 +129,7 @@ def create_parser() -> argparse.ArgumentParser:
         "GPU (or round-robin across GPUs if this exceeds the device "
         "count). Default: 1 (sequential, today's behavior).",
     )
-    parser.add_argument(
-        "--optimizer", choices=["smac", "random", "ifbo", "rl_freeze_thaw"]
-    )
+    parser.add_argument("--optimizer", choices=["smac", "random", "ifbo"])
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     parser.add_argument(
         "--ifbo-incumbent-ensemble-top-k",

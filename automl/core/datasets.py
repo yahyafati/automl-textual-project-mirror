@@ -157,8 +157,6 @@ class BaseTextDataset(ABC):
             train_df = train_df.loc[sampled_indices].sort_index()
 
         # --- apply max_num_rows (uniform/stratified cap) ---
-        # TODO: Since the addition of this, the validation accuracy has been going down
-        #  This might just be normal, or an issue with the thing
         if max_num_rows is not None:
             train_df = self._uniform_sample(
                 train_df, max_num_rows=max_num_rows, random_state=random_state

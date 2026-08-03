@@ -134,22 +134,7 @@ class HyperparameterSpace:
 
         all_names = list(specs.keys())
 
-        # `model_type` is dropped unconditionally regardless of how much
-        # headroom the space has - it's a `ConfigSpace.Constant`, constant
-        # for the whole run, and so carries zero information for the
-        # surrogate no matter the dimension budget. In this project it's
-        # already filtered out earlier too (see `_build_hp_space`); this is
-        # a defensive second filter for any other caller of this class.
         all_names = [name for name in all_names if name != "model_type"]
-
-        # Everything else is only dropped if the space still doesn't fit
-        # MAX_HYPERPARAMETERS afterwards, and then only as many - in this
-        # order, least-useful-first - as needed to fit. This is a priority
-        # list, not an unconditional drop list: e.g. `transformer`'s space
-        # already fits within the cap without dropping `warmup_ratio`, so it
-        # keeps it, while `sequence-dl` needs both entries dropped to fit.
-        # See `docs/IFBO_METHOD.md` §3 for the reasoning behind this
-        # ordering (a judgment call, not a rigorous ablation).
         drop_priority = ["warmup_ratio", "seq_num_layers"]
 
         dropped_names: list[str] = []

@@ -12,18 +12,6 @@ logger = get_logger()
 
 
 def atomic_torch_save(obj: Any, path: Union[str, Path]) -> None:
-    """Writes `obj` via `torch.save` without ever leaving a truncated file at
-    `path`.
-
-    `torch.save` writes directly to its target file, so a process killed
-    mid-write (Ctrl-C, OOM-kill, crash) leaves a corrupt, half-written
-    checkpoint - `torch.load` on that file later fails with a miniz "failed
-    finding central directory" error, indistinguishable from real disk
-    corruption. Saving to a temp file in the same directory and
-    `os.replace`-ing it into place makes the swap atomic: `path` always
-    either holds the previous complete checkpoint or the new one, never a
-    partial write.
-    """
     import torch
 
     path = Path(path)

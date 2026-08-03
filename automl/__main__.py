@@ -1,12 +1,3 @@
-"""
-Joint search space for the TF-IDF text-classification pipeline.
-
-Run this file directly to sanity-check the space (prints a few sampled
-configs). Wiring into an actual optimizer (SMAC's MultiFidelityFacade,
-syne-tune's ASHA, etc.) is sketched at the bottom -- swap in your own
-train/eval function.
-"""
-
 from __future__ import annotations
 
 import json
@@ -35,7 +26,6 @@ def main(config: RuntimeConfig):
         "smac": optimizers.SmacOptimizer,
         "random": optimizers.RandomSearch,
         "ifbo": optimizers.IfboOptimizer,
-        "rl_freeze_thaw": optimizers.RLFreezeThawOptimizer,
     }
     optimizer_name = config.get("optimizer", "smac")
     optimizer = optimizer_classes[optimizer_name](config)

@@ -389,24 +389,6 @@ class Optimizer(ABC):
         device: Optional[torch.device] = None,
         num_workers: Optional[int] = None,
     ) -> float:
-        """
-        Train a single configuration for a given budget.
-
-        `device`/`num_workers` default to the optimizer's configured
-        single device/worker count, but can be overridden per call so
-        multiple trials can be dispatched concurrently across different
-        devices (see IfboOptimizer's parallel-trial loop). Callers that
-        run several of these concurrently on separate threads are
-        responsible for calling `torch.cuda.set_device(device)` first, so
-        that any implicit "current device" op (e.g. CUDA cache clearing
-        inside the trainer) targets the right GPU.
-
-        Returns
-        -------
-        val_error : float
-            1 - best validation accuracy observed across the whole
-            (possibly checkpoint-resumed) training run so far.
-        """
         val_error, _ = self._train_single_configuration_with_history(
             config=config,
             seed=seed,
@@ -424,16 +406,6 @@ class Optimizer(ABC):
         device: Optional[torch.device] = None,
         num_workers: Optional[int] = None,
     ) -> tuple[float, list[EpochResult]]:
-        """
-        Same as `train_single_configuration`, but also returns the
-        per-epoch training history (`TrainResult["history"]`) for this
-        call, i.e. every epoch actually trained (including ones replayed
-        from a resumed checkpoint before this call's new epochs). Callers
-        that need the raw, non-aggregated per-epoch validation accuracy
-        (e.g. ifBO's freeze-thaw curve, which must not conflate "value at
-        epoch e" with "best value seen up to epoch e") should use this
-        instead of reading `val_error` alone.
-        """
         from automl.core.utils import timer
 
         device = device or self.device
@@ -502,29 +474,6 @@ class Optimizer(ABC):
             )
 
             with approach.with_mode("train") as _approach:
-                # `set_seed` reseeds process-global RNGs (torch/numpy/
-                # random); `approach.prepare()` builds the model (default
-                # weight init draws from that same global torch RNG). Only
-                # `set_seed` itself is locked - it's a handful of cheap
-                # calls, so making it atomic avoids two threads' seeding
-                # statements literally interleaving mid-call. `prepare()`
-                # is deliberately NOT under the lock even though it reads
-                # RNG state right after: it also does the expensive,
-                # CPU-bound work (tokenizing the whole corpus, building
-                # the model, PCA-projecting a pretrained embedding matrix
-                # for sequence-dl) - serializing that behind a lock starved
-                # every GPU but one of any work to do, since with N
-                # threads only one can be inside `prepare()` at a time.
-                # Net effect: with `num_parallel_trials > 1`, exact
-                # "same seed -> same result" reproducibility no longer
-                # holds (a concurrently-running trial's `set_seed` can
-                # land between this trial's seeding and its weight init) -
-                # already an accepted trade-off, since ifBO treats
-                # observed accuracy as noisy regardless. Data loading
-                # doesn't need any of this protection: both
-                # `train_test_split` and the uniform-sampling helper use
-                # their own locally-seeded RandomState, not the global
-                # RNG.
                 with self._state_lock:
                     set_seed(seed)
                 prepared_result = _approach.prepare(train_split, val_split)
@@ -552,11 +501,6 @@ class Optimizer(ABC):
             epoch_history = result["history"]
 
             with self._state_lock:
-                # TODO: Maybe we don't need this
-                # if budget > self.highest_budget_seen:
-                #     self.highest_budget_seen = budget
-                #     self.best_val_error = float("inf")
-
                 is_best_yet = (
                     budget >= self.highest_budget_seen
                     and val_error < self.best_val_error
