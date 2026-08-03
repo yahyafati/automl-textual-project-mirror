@@ -237,7 +237,10 @@ class IfboOptimizer(Optimizer):
     def _sample_new_candidate(self) -> _IfBOCandidate:
         cfg: Configuration = self.space.sample_configuration()
         z = self.hp_space.encode(dict(cfg))
-        cand = _IfBOCandidate(config=cfg, z=z, uid=next(self._uid_counter))
+        data_seed = self._rng.randint(1, 2**31 - 1)
+        cand = _IfBOCandidate(
+            config=cfg, z=z, uid=next(self._uid_counter), data_seed=data_seed
+        )
         return cand
 
     def _epsilon(self, completed_trials: int) -> float:
@@ -305,6 +308,7 @@ class IfboOptimizer(Optimizer):
             budget=float(budget),
             device=device,
             num_workers=num_workers,
+            data_seed=cand.data_seed,
         )
 
         new_epochs = [
