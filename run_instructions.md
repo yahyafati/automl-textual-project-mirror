@@ -31,11 +31,6 @@ This command is safely interruptible: re-running it with the same
 `--runtime-id` resumes partially-trained configs from their checkpoints
 instead of restarting from scratch (the "(ii) partially trained model" case).
 
-*Do not* use `make run DATASET=yelp` — the Makefile's `run` target only
-accepts the 4 Phase-I practice datasets (`amazon`/`ag_news`/`imdb`/`dbpedia`);
-`yelp` is only driven through `--config runconfig.yml`, which is what its
-`dataset: yelp` field is for.
-
 ## Step 2: Retrain the top-k configs on full data and generate predictions
 
 ```bash

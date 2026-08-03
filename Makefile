@@ -4,7 +4,7 @@ POETRY ?= poetry
 
 TOKENIZER_MODELS ?= distilbert-base-uncased bert-base-uncased google/bert_uncased_L-4_H-512_A-8 microsoft/xtremedistil-l6-h256-uncased
 FORMAT_PATHS ?= .
-DATASETS := amazon ag_news imdb dbpedia
+DATASETS := amazon ag_news imdb dbpedia yelp
 DATASET ?= amazon
 ARGS ?=
 
