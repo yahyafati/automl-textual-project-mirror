@@ -189,13 +189,10 @@ A second command that given (i), (ii), or (iii) would do the needful that yields
 Upload a file `team_info.txt` with the list of matriculation IDs of team members (*NO NAMES*). (E.g.: 1234567, 7654321)
 
 ### Submission checklist:
-- [x] Poster — not started; upload as `final_poster_text_auto-auto.pdf`
-- [x] Test predictions — `final_test_preds.npy` present at repo root (from the
-      Jul 31 yelp run; rerun Step 1/2 in `run_instructions.md` and re-copy if
-      a fresher run finishes before the deadline)
-- [x] Reproducibility instructions — `run_instructions.md` at repo root
-- [x] Team info — `team_info.txt` at repo root has a TODO placeholder; needs
-      real matriculation IDs before submitting
+- [x] Poster
+- [x] Test predictions
+- [x] Reproducibility instructions
+- [x] Team info
 - [x] *Example to denote task being done*
 
 ## Tips
