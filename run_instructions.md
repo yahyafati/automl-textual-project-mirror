@@ -31,7 +31,17 @@ This command is safely interruptible: re-running it with the same
 `--runtime-id` resumes partially-trained configs from their checkpoints
 instead of restarting from scratch (the "(ii) partially trained model" case).
 
-## Step 2: Retrain the top-k configs on full data and generate predictions
+`runconfig.yml` has `evaluate_incumbent: true`, so Step 1 already retrains
+its incumbent(s) on the full training split, evaluates on the held-out test
+set, and writes `results/yelp/<run_id>/predictions.npy` directly — **Step 2
+below is not needed** in that case. Skip straight to "Produce the submission
+file".
+
+## Step 2 (only if `evaluate_incumbent: false`): Retrain the top-k configs on full data and generate predictions
+
+Only run this step if Step 1 was run with `evaluate_incumbent: false` /
+`--no-evaluate-incumbent` (incumbent evaluation skipped, so no
+`predictions.npy` was written yet):
 
 ```bash
 python scripts/train_top_k_from_history.py \
@@ -51,5 +61,9 @@ already-trained incumbents via its `manifest.json`.
 ## Produce the submission file
 
 ```bash
+# if evaluate_incumbent was true (Step 1 already wrote predictions.npy):
+cp results/yelp/<run_id>/predictions.npy final_test_preds.npy
+
+# if evaluate_incumbent was false (used Step 2 instead):
 cp results_final/yelp/<run_id>/predictions.npy final_test_preds.npy
 ```
