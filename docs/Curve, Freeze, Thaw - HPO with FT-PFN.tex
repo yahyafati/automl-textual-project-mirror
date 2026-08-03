@@ -350,45 +350,204 @@ min_budget: 3
 n_trials: 20
 \end{verbatim}
 
-%\subsection*{Baselines}
-%
-%Three baselines, each isolating a different piece of what makes the flagship method work ---
-%every one answers a specific ``would doing less still work?'' question rather than just being an
-%arbitrary point of comparison:
-%
-%\begin{itemize}
-%    \item \textbf{Random Search} --- no multi-fidelity behavior at all: every trial
-%    samples a fresh configuration uniformly from $\Lambda$ and trains it straight through to
-%    \texttt{max\_budget} epochs before it's ever compared against anything else. It never resumes a
-%    partially-trained config and never cuts a bad one short. This is the floor every other method
-%    has to beat to justify its extra machinery, and it also sets an upper bound on wall-clock cost
-%    per trial, since it always pays for the \emph{full} epoch budget regardless of how a config is
-%    doing partway through (see the wall-clock comparison below --- this is exactly why its bars are
-%    tallest everywhere).
-%    \item \textbf{SMAC (BO+HB)} --- SMAC3's random-forest-surrogate Bayesian
-%    optimization, paired with a Hyperband intensifier for multi-fidelity scheduling (successive
-%    halving: only the top fraction of configs at each rung's budget get promoted to the next,
-%    larger one). This isolates what a \emph{classical, non-neural} multi-fidelity method achieves under
-%    the same epoch-budget range as ifBO --- the fairest like-for-like comparison against the
-%    flagship method, since both get to allocate budget adaptively instead of uniformly, but SMAC
-%    does it with a random-forest-EI surrogate and a handful of \emph{discrete} Hyperband rungs, instead
-%    of FT-PFN's in-context transformer and \emph{continuous} freeze-thaw (visible directly in the
-%    fidelity-allocation figure below: SMAC's budget trace is a coarse two-level sawtooth, ifBO's
-%    is a much finer staircase).
-%    \item \textbf{ifBO (random selection)} --- runs the \emph{exact same} freeze-thaw pipeline and candidate-pool
-%    machinery as the flagship method, but with \texttt{ifbo\_use\_random\_selection=True}: FT-PFN's MFPI-random scoring is swapped for a uniform random choice among that round's pending pool. This is the
-%    most targeted ablation of the three --- everything about \emph{how much} budget is spent
-%    incrementally vs.\ upfront is held identical to the flagship run, so any gap between this and
-%    full ifBO isolates the value of the \emph{surrogate's guidance specifically}, separate from the
-%    value of freeze-thaw scheduling in general.
-%\end{itemize}
-%
-% NOTE: if/when the above is uncommented together with real results numbers, flag that those
-% numbers were generated under the earlier candidate-selection logic (fresh candidates competing
-% in every exploitation round alongside `pending`) described in "Growing the candidate pool" ---
-% see the equivalent note in docs/Paper.md's Results section for the wording used there.
+\subsection*{Baselines}
+
+Three baselines, each isolating a different piece of what makes the flagship method work ---
+every one answers a specific ``would doing less still work?'' question rather than just being an
+arbitrary point of comparison:
+
+\begin{itemize}
+    \item \textbf{Random Search} --- no multi-fidelity behavior at all: every trial
+    samples a fresh configuration uniformly from $\Lambda$ and trains it straight through to
+    \texttt{max\_budget} epochs before it's ever compared against anything else. It never resumes a
+    partially-trained config and never cuts a bad one short. This is the floor every other method
+    has to beat to justify its extra machinery, and it also sets an upper bound on wall-clock cost
+    per trial, since it always pays for the \emph{full} epoch budget regardless of how a config is
+    doing partway through (see the wall-clock comparison below --- this is exactly why its bars are
+    tallest everywhere).
+    \item \textbf{SMAC (BO+HB)} --- SMAC3's random-forest-surrogate Bayesian
+    optimization, paired with a Hyperband intensifier for multi-fidelity scheduling (successive
+    halving: only the top fraction of configs at each rung's budget get promoted to the next,
+    larger one). This isolates what a \emph{classical, non-neural} multi-fidelity method achieves under
+    the same epoch-budget range as ifBO --- the fairest like-for-like comparison against the
+    flagship method, since both get to allocate budget adaptively instead of uniformly, but SMAC
+    does it with a random-forest-EI surrogate and a handful of \emph{discrete} Hyperband rungs, instead
+    of FT-PFN's in-context transformer and \emph{continuous} freeze-thaw (visible directly in the
+    fidelity-allocation figure below: SMAC's budget trace is a coarse two-level sawtooth, ifBO's
+    is a much finer staircase).
+    \item \textbf{ifBO (random selection)} --- runs the \emph{exact same} freeze-thaw pipeline and candidate-pool
+    machinery as the flagship method, but with \texttt{ifbo\_use\_random\_selection=True}: FT-PFN's MFPI-random scoring is swapped for a uniform random choice among that round's pending pool. This is the
+    most targeted ablation of the three --- everything about \emph{how much} budget is spent
+    incrementally vs.\ upfront is held identical to the flagship run, so any gap between this and
+    full ifBO isolates the value of the \emph{surrogate's guidance specifically}, separate from the
+    value of freeze-thaw scheduling in general.
+\end{itemize}
+
+\textit{Note on the numbers below:} the four runs backing this subsection
+(\texttt{sample-results/all\_results/}, timestamped 2026-07-31) predate the removal of the
+incumbent-exclusion rule and fresh-candidate-in-exploitation injection described in ``Growing
+the candidate pool'' above --- i.e.\ the \texttt{ifBO} column reflects the \emph{earlier}
+candidate-selection logic, not the one currently in the codebase. The qualitative story
+(freeze-thaw beats fixed-budget search, and surrogate guidance beats random thawing on most
+datasets) is expected to hold under the current logic too, but the exact margins below should
+not be read as reproducible with today's code without a rerun.
 
 \subsection*{Testbed Results}
+
+All four methods were run under the matched budget above (\texttt{n\_trials=20},
+\texttt{min\_budget=3}, \texttt{max\_budget=10} epochs, \texttt{sequence-dl}/BiLSTM search space)
+across all five datasets --- \texttt{ag\_news}, \texttt{amazon}, \texttt{dbpedia}, \texttt{imdb}, and the
+held-out exam set \texttt{yelp}. Numbers are \textbf{best validation accuracy}
+($1 - \min(\text{val\_error})$ over the run), i.e.\ search quality rather than a held-out test
+score. Raw histories live in \texttt{sample-results/all\_results}; the figures below are
+regenerated straight from those \texttt{.jsonl} files by
+\texttt{final\_results\_analysis.ipynb} in that same directory.
+
+\subsubsection*{Final best validation accuracy}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Dataset} & \textbf{ifBO} & \textbf{SMAC (BO+HB)} & \textbf{Random Search} & \textbf{ifBO (random selection)} \\
+\midrule
+AG News  & 91.35\% & 89.35\% & 89.65\% & \textbf{92.45\%} \\
+Amazon   & \textbf{89.15\%} & 78.20\% & 79.25\% & 79.30\% \\
+DBpedia  & \textbf{97.85\%} & 97.00\% & 97.80\% & 97.70\% \\
+IMDB     & \textbf{93.80\%} & 85.25\% & 86.70\% & 87.70\% \\
+Yelp     & \textbf{58.10\%} & 50.50\% & 55.10\% & 54.35\% \\
+\bottomrule
+\end{tabular}
+\caption{Best validation accuracy per dataset and method.}
+\end{table}
+
+Full ifBO (FT-PFN-guided) wins on 4 of 5 datasets, with the largest margins on the hardest
+tasks --- Amazon (+9.90pp over the best baseline) and Yelp (+3.0pp over Random, +7.6pp over
+SMAC). On AG News, its own random-selection ablation edges it out (92.45\% vs.\ 91.35\%) --- on
+the easiest dataset in the suite (all four methods clear 89\%), the FT-PFN surrogate's
+acquisition doesn't have much signal to exploit over unguided freeze-thaw scheduling, so the two
+land within noise of each other. Everywhere else, guided candidate selection is what separates
+ifBO from its own ablation.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/03_final_accuracy_bars.png}
+\caption{Final accuracy bars per dataset and method.}
+\end{figure}
+
+The bar chart above puts all four methods side by side per dataset --- read it for
+\emph{magnitude} of the gaps (Amazon and Yelp show real daylight between ifBO and everything
+else; AG News and DBpedia show all four methods bunched within a couple of points). The heatmap
+below is the same numbers, but its shading makes the two structurally different
+failure/success stories in this table pop out immediately: DBpedia's whole row is uniformly
+dark (97--98\% for \emph{every} method) --- with \texttt{max\_budget=10} epochs, this dataset is close
+to saturated for the \texttt{sequence-dl} search space, so there's little room for any optimizer to
+differentiate itself. Yelp's row is uniformly the lightest (50--58\%) --- every method tops out
+well below where it lands on the other four datasets, so Yelp is a genuinely harder
+classification problem at this fidelity budget, not just a dataset where the optimizer happened
+to do badly.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.75\textwidth]{figures/04_accuracy_heatmap.png}
+\caption{Accuracy heatmap across datasets and methods.}
+\end{figure}
+
+\subsubsection*{Sample efficiency and wall-clock cost}
+
+Freeze-thaw's structural advantage shows up earliest here: both ifBO variants pull ahead of
+Random/SMAC within the first several trials on every dataset, because a handful of thaw steps
+into one promising candidate teach the surrogate (or even just the epsilon-floor exploration
+alone) more than one epoch each spent across many never-revisited configs. The step lines below
+are the running best-so-far incumbent; faint dots are every individual trial actually sampled,
+so the vertical spread of dots at a given x tells you how much the optimizer is still gambling on
+long shots even after it's found something good. SMAC's characteristic pattern is a late, sharp
+jump once a Hyperband rung promotes a strong config --- it's blind to that config's promise until
+the rung boundary says to check on it again (its budget trace only ever touches two values,
+$\sim$3.3 and 10 epochs, see the fidelity-allocation figure below), unlike ifBO's much smoother,
+earlier climb.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/02_best_vs_trial.png}
+\caption{Best validation accuracy vs.\ trial number.}
+\end{figure}
+
+Against wall-clock time, the same curves stretch out very differently per method: Random
+Search's step lines are still moving well after both ifBO variants have converged and gone
+flat, since every single trial (good or bad) costs it a full \texttt{max\_budget}-epoch training
+run --- it simply hasn't finished sampling yet by the time freeze-thaw has already plateaued.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/01_best_vs_wallclock.png}
+\caption{Best validation accuracy vs.\ wall-clock time.}
+\end{figure}
+
+Total wall-clock (elapsed time from the first trial's start to the last trial's start, over all
+20 trials of a run) tells the same story in aggregate: Random Search consistently takes
+2--4$\times$ longer than either ifBO variant for a 20-trial run (e.g.\ $\sim$147 vs.\ $\sim$41
+minutes on DBpedia, $\sim$144 vs.\ $\sim$50 on Yelp), without a corresponding accuracy payoff. A
+subtler gap sits between the two ifBO variants themselves: the random-selection ablation is
+consistently faster than the full surrogate-guided run on every dataset (e.g.\ $\sim$31 vs.\
+$\sim$76 minutes on Amazon, $\sim$20 vs.\ $\sim$35 on IMDB) despite following an identical
+freeze-thaw training schedule --- the difference is pure FT-PFN inference overhead, one batched
+forward pass through the surrogate on every exploitation round, which the ablation skips
+entirely by picking uniformly at random instead.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/08_total_wallclock.png}
+\caption{Total wall-clock time per dataset and method.}
+\end{figure}
+
+\subsubsection*{Where the budget goes}
+
+The per-trial accuracy distribution below shows \emph{every} sampled trial, not just the
+incumbent --- a tighter, higher box means an optimizer is spending steps on consistently good
+configs rather than wasting them on poor ones. ifBO's box is the tightest and highest of the
+four on most datasets, direct evidence that surrogate-guided selection is concentrating repeat
+thaws on configs already known to be good rather than spending them on fresh gambles. Random's
+and SMAC's boxes are consistently the widest, spanning from floor accuracy up to their max ---
+both are still spending real trials on poor draws this late into the search, since neither can
+\texttt{thaw}-revisit a specific promising config on demand the way freeze-thaw can.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/05_accuracy_boxplots.png}
+\caption{Per-trial accuracy distribution.}
+\end{figure}
+
+The epoch-budget plot makes the \emph{shape} of each method's multi-fidelity policy visible
+directly, trial by trial. Random Search is a flat ceiling line at \texttt{max\_budget} by
+construction --- it has no multi-fidelity policy. SMAC's Hyperband intensifier produces a coarse,
+almost binary sawtooth that only ever touches two values ($\sim$3.3 and 10 epochs) --- at this
+budget range the successive-halving bracket only has two rungs, so a config is either killed at
+the bottom rung or promoted straight to the top one, with nothing in between. Both ifBO variants
+instead walk the \emph{entire} epoch grid (4, 5, 6, 7, 8, 9, \ldots) --- the direct visual signature
+of literal one-step-at-a-time freeze-thaw: a config is thawed for one more increment,
+re-evaluated, and only then is the next decision made, rather than being judged at a small
+number of fixed checkpoints.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/06_fidelity_allocation.png}
+\caption{Epoch budget allocated per trial.}
+\end{figure}
+
+Finally, the training curve of each method's single best-found configuration per dataset ---
+this is the one figure that shows \emph{within-run} learning-curve shape rather than
+across-trial search behavior. On IMDB, ifBO's best config reaches 93.8\% accuracy in just 4
+epochs and its curve stops there (that's all the budget it was ever thawed for), while SMAC's
+best config needs the full 10 epochs to climb to only 85.25\% --- a smaller number reached with
+more than double the training cost, since freeze-thaw was able to recognize this config's
+quality early and never needed to push it further.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/07_best_trial_curves.png}
+\caption{Best trial training curves per dataset.}
+\end{figure}
 
 \subsection*{Final Submission Results}
 
