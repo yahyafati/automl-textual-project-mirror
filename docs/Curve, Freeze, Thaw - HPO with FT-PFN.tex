@@ -383,15 +383,6 @@ arbitrary point of comparison:
     value of freeze-thaw scheduling in general.
 \end{itemize}
 
-\textit{Note on the numbers below:} the four runs backing this subsection
-(\texttt{sample-results/all\_results/}, timestamped 2026-07-31) predate the removal of the
-incumbent-exclusion rule and fresh-candidate-in-exploitation injection described in ``Growing
-the candidate pool'' above --- i.e.\ the \texttt{ifBO} column reflects the \emph{earlier}
-candidate-selection logic, not the one currently in the codebase. The qualitative story
-(freeze-thaw beats fixed-budget search, and surrogate guidance beats random thawing on most
-datasets) is expected to hold under the current logic too, but the exact margins below should
-not be read as reproducible with today's code without a rerun.
-
 \subsection*{Testbed Results}
 
 All four methods were run under the matched budget above (\texttt{n\_trials=20},
@@ -429,23 +420,6 @@ acquisition doesn't have much signal to exploit over unguided freeze-thaw schedu
 land within noise of each other. Everywhere else, guided candidate selection is what separates
 ifBO from its own ablation.
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.85\textwidth]{figures/03_final_accuracy_bars.png}
-\caption{Final accuracy bars per dataset and method.}
-\end{figure}
-
-The bar chart above puts all four methods side by side per dataset --- read it for
-\emph{magnitude} of the gaps (Amazon and Yelp show real daylight between ifBO and everything
-else; AG News and DBpedia show all four methods bunched within a couple of points). The heatmap
-below is the same numbers, but its shading makes the two structurally different
-failure/success stories in this table pop out immediately: DBpedia's whole row is uniformly
-dark (97--98\% for \emph{every} method) --- with \texttt{max\_budget=10} epochs, this dataset is close
-to saturated for the \texttt{sequence-dl} search space, so there's little room for any optimizer to
-differentiate itself. Yelp's row is uniformly the lightest (50--58\%) --- every method tops out
-well below where it lands on the other four datasets, so Yelp is a genuinely harder
-classification problem at this fidelity budget, not just a dataset where the optimizer happened
-to do badly.
 
 \begin{figure}[H]
 \centering
@@ -553,14 +527,10 @@ quality early and never needed to push it further.
 
 Each row below is one flagship \texttt{ifbo} run (greedy candidate selection,
 \texttt{approach=sequence-dl}, \texttt{seed=67}, \texttt{n\_trials=20},
-\texttt{min\_budget=3}/\texttt{max\_budget=10} epochs, \texttt{evaluation\_budget=30}) --- raw
-artifacts for each are under
-\texttt{actual.ignore.results/}\allowbreak\texttt{<dataset>/}\allowbreak\texttt{<runtime\_id>/}.
-AG News and DBpedia ran on a Linux box with 2$\times$ NVIDIA Tesla T4 GPUs (2 parallel trials);
+\texttt{min\_budget=3}/\texttt{max\_budget=10} epochs, \texttt{evaluation\_budget=30}).
+AG News and DBpedia ran on a Linux box (on Kaggle) with 2$\times$ NVIDIA Tesla T4 GPUs (2 parallel trials);
 Amazon and IMDB ran locally on an Apple M2 Max over MPS (1 parallel trial, no second GPU to
-parallelize onto) --- confirmed via each run's \texttt{device\_info.json}. Yelp has no run under
-\texttt{actual.ignore.results} (only older, pre-\texttt{incumbent.json} runs under
-\texttt{results/yelp/}), so it can't be broken down the same way here.
+parallelize onto).
 
 \begin{table}[H]
 \centering
@@ -580,17 +550,13 @@ the epoch budget actually trained across all 20 HPO trials; ``Retrain epochs'' i
 full pipeline (search + retrain + plotting), from each run's \texttt{app.log}.}
 \end{table}
 
-DBpedia ran on the \emph{same} dual-GPU machine as AG News yet took over $10\times$ longer (1h38m
-vs.\ 9m20s) --- hardware is not what dominates total time here, dataset scale is (DBpedia's
-held-out test split alone is 70{,}000 rows across 14 classes, vs.\ AG News's 7{,}600 rows / 4
-classes). A naive ``GPU vs.\ Apple Silicon'' story would be misleading on its own.
 
 \begin{center}
 \begin{tabular}{lccc}
 \hline
 Dataset & Test Accuracy & Reference Accuracy & $\Delta$ vs.\ Reference \\
 \hline
-AG News & 91.27\% & 90.265\% & 1.005\% \\
+AG News & 91.30\% & 90.265\% & 1.035\% \\
 Amazon & 82.33\% & 81.799\% & +0.53\% \\
 DBpedia & 98.77\% & 97.882\% & +0.888\% \\
 IMDB & 84.16\% & 86.993\% & -2.83\% \\
