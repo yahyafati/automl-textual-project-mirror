@@ -1,0 +1,35 @@
+output_path: actual-results
+load_path: null
+data_path: data
+
+seed: 67
+
+evaluation_budget: 30
+max_budget: 10
+min_budget: 3
+n_trials: 20
+optimizer: ifbo  # use rl_freeze_thaw for the PPO Freeze--Thaw scheduler
+
+approach: sequence-dl
+#device: cpu
+num_workers: 4 # TODO: I don't think this is being properly used
+num_parallel_trials: 1
+max_num_rows: 30000
+max_trial_time_seconds: 120
+val_size: 0.1
+
+max_trainers_in_memory: 2 # TODO: Delete this
+log_level: DEBUG
+ifbo_use_random_selection: false
+ifbo_greedy_candidate_selection: true
+
+ifbo_incumbent_ensemble_top_k: 1
+ifbo_incumbent_ensemble_accuracy_threshold: 0.1
+
+stochastic_epochs: true
+stochastic_epoch_fraction: 0.5
+
+ifbo_thaw_step: 1
+evaluate_incumbent: true
+
+ifbo_incumbent_exclusion_min_observations: 2
