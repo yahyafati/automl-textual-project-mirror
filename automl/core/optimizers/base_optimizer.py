@@ -376,6 +376,7 @@ class Optimizer(ABC):
         budget: float,
         device: Optional[torch.device] = None,
         num_workers: Optional[int] = None,
+        data_seed: Optional[int] = None,
     ) -> float:
         val_error, _ = self._train_single_configuration_with_history(
             config=config,
@@ -383,6 +384,7 @@ class Optimizer(ABC):
             budget=budget,
             device=device,
             num_workers=num_workers,
+            data_seed=data_seed,
         )
         return val_error
 
@@ -393,6 +395,7 @@ class Optimizer(ABC):
         budget: float,
         device: Optional[torch.device] = None,
         num_workers: Optional[int] = None,
+        data_seed: Optional[int] = None,
     ) -> tuple[float, list[EpochResult]]:
         from automl.core.utils import timer
 
@@ -400,6 +403,13 @@ class Optimizer(ABC):
         num_workers = (
             self.runtime_config["num_workers"] if num_workers is None else num_workers
         )
+        # Defaults to `seed` for callers that evaluate each config once
+        # (SMAC/Hyperband, RandomSearch). Callers that resume the same
+        # config across multiple calls (e.g. ifBO's freeze-thaw steps) must
+        # pass a `data_seed` that stays fixed for that config's lifetime,
+        # since the model checkpoint carries over between calls but a
+        # changing split would silently move rows between train and val.
+        data_seed = seed if data_seed is None else data_seed
 
         model_type = config["model_type"]
         config_id = self._config_to_hash_id(config)
@@ -423,6 +433,7 @@ class Optimizer(ABC):
                 f"Budget: {budget}, "
                 f"Train Fraction: {train_fraction:.2f}, "
                 f"Seed: {seed}, "
+                f"Data Seed: {data_seed}, "
                 f"Approach: {model_type}, "
                 f"Device: {device}"
             )
@@ -430,7 +441,7 @@ class Optimizer(ABC):
             val_size = self.runtime_config["val_size"]
             data_info = self.dataset.create_dataloaders(
                 val_size=val_size,
-                random_state=seed,
+                random_state=data_seed,
                 train_fraction=train_fraction,
                 max_num_rows=max_num_rows,
             )
