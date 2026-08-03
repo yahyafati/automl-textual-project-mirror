@@ -48,6 +48,22 @@ Safely interruptible: re-running with the same `--runtime-id` resumes
 partially-trained configs from their checkpoints instead of restarting from
 scratch (the "(ii) partially trained model" case).
 
+## Reproducing the submitted results for the other datasets
+
+`yelp` is the only dataset graded on the held-out test set, and it's
+reproduced via `runconfig.yml` above. The submitted results for the
+remaining datasets (`ag_news`, `imdb`, `amazon`, `dbpedia`) were produced
+with `runconfig.submitted.yml` instead — pass `--dataset` explicitly since
+that config doesn't pin one:
+
+```bash
+python -m automl --config runconfig.submitted.yml --dataset <ag_news|imdb|amazon|dbpedia> --seed 67 --runtime-id <run_id>
+```
+
+This writes under `actual-results/<dataset>/<run_id>/` (`runconfig.submitted.yml`
+sets `output_path: actual-results`), following the same
+`history.log.jsonl` / `checkpoints/` / `predictions.npy` layout as Step 1.
+
 ## Step 2 — only if `evaluate_incumbent: false` was used
 
 If Step 1 was run with `evaluate_incumbent: false` / `--no-evaluate-incumbent`
