@@ -597,7 +597,6 @@ class Optimizer(ABC):
 
         with approach.with_mode("eval") as _approach:
             prepared = _approach.prepare(train_split, test_split)
-            # TODO: evaluate validation now only works in sequence-dl
             train_result = _approach.train(
                 prepared, epochs=epochs, evaluate_validation=should_evaluate
             )

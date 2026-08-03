@@ -16,7 +16,7 @@ optimizer: ifbo
 max_trial_time_seconds: 1800
 
 approach: sequence-dl
-num_workers: 1 # TODO: I don't think this is being properly used
+num_workers: 1
 num_parallel_trials: 2
 max_num_rows: 100000
 val_size: 0.2

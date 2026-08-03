@@ -140,7 +140,7 @@ def evaluate_incumbent(
         incumbent,
         data_info["num_classes"],
         get_device(),
-        num_workers=0,  # TODO: Get from runtime config
+        num_workers=0,
     )
 
     with approach.with_mode("eval") as _approach:

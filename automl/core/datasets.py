@@ -1,5 +1,5 @@
 """Dataset classes for NLP AutoML tasks."""
-
+import string
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Tuple, Optional, TypedDict
@@ -66,13 +66,12 @@ class BaseTextDataset(ABC):
     @staticmethod
     def preprocess_text(text: str) -> str:
         """Basic text preprocessing."""
-        # TODO: Implement proper pre processing
         # Convert to lowercase
         text = text.lower()
-        # # Remove punctuation
-        # text = text.translate(str.maketrans("", "", string.punctuation))
-        # # Remove extra whitespace
-        # text = " ".join(text.split())
+        # Remove punctuation
+        text = text.translate(str.maketrans("", "", string.punctuation))
+        # Remove extra whitespace
+        text = " ".join(text.split())
         return text
 
     @staticmethod
