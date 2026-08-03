@@ -519,6 +519,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         prepared_result,
         epochs: int = 10,
         load_path: Optional[Path] = None,
+        save_path: Optional[Path] = None,
         evaluate_validation=True,
         **kwargs,
     ) -> TrainResult:
@@ -570,7 +571,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         assert self.trainer is not None
         result = self.trainer.train(
             load_path=load_path,
-            save_path=None,  # or some path if you want val-best checkpoint
+            save_path=save_path,
         )
         logger.info(f"[{self.name}] train() finished after {epochs} epoch(s).")
         return result

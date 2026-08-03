@@ -578,15 +578,31 @@ class Optimizer(ABC):
             ],
         )
 
+        # Retraining runs for the full `evaluation_budget` regardless of where
+        # accuracy peaks, so without checkpointing the best epoch here,
+        # `predict()` below would run on whatever (possibly overfit/degraded)
+        # weights the final epoch happens to leave behind, while
+        # `train_result["val_accuracy"]` would keep reporting the earlier
+        # peak -- silently mismatching what's actually predicted.
+        best_ckpt_path = self.checkpoint_dir / "incumbent_eval_best.pt"
+
         with approach.with_mode("eval") as _approach:
             prepared = _approach.prepare(train_split, test_split)
             # TODO: evaluate validation now only works in sequence-dl
             train_result = _approach.train(
-                prepared, epochs=epochs, evaluate_validation=should_evaluate
+                prepared,
+                epochs=epochs,
+                evaluate_validation=should_evaluate,
+                save_path=best_ckpt_path if should_evaluate else None,
             )
-            self.logger.info(
-                "Predicting for test set"
-            )
+            if should_evaluate and best_ckpt_path.exists():
+                self.logger.info(
+                    f"[{self.__class__.__name__}] Restoring best-epoch checkpoint "
+                    f"(val_accuracy={train_result['val_accuracy']:.4f}) before "
+                    f"final prediction."
+                )
+                _approach.trainer.load(best_ckpt_path)
+            self.logger.info("Predicting for test set")
             prediction_result = _approach.predict(test_df)
 
         self.logger.info(
