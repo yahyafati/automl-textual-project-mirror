@@ -5,7 +5,7 @@ from typing import Union, Optional
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from torch.nn.utils.rnn import pack_padded_sequence
 from ConfigSpace import Configuration
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase, AutoModel
@@ -128,10 +128,7 @@ class BiLSTMClassifier(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
         directions = 2 if bidirectional else 1
-        attn_dim = hidden_dim * directions
-        self.attn_w = nn.Linear(attn_dim, attn_dim)
-        self.attn_v = nn.Linear(attn_dim, 1, bias=False)
-        self.fc = nn.Linear(attn_dim, num_classes)
+        self.fc = nn.Linear(hidden_dim * directions, num_classes)
 
     def forward(self, input_ids):
         lengths = (input_ids != self.embedding.padding_idx).sum(dim=1).clamp(min=1)
@@ -140,21 +137,17 @@ class BiLSTMClassifier(nn.Module):
         packed = pack_padded_sequence(
             emb, lengths.cpu(), batch_first=True, enforce_sorted=False
         )
-        packed_out, _ = self.lstm(packed)
-        outputs, _ = pad_packed_sequence(
-            packed_out, batch_first=True, total_length=input_ids.size(1)
-        )
+        _, (h_n, c_n) = self.lstm(packed)  # h_n: (num_layers*D, B, H)
 
-        mask = torch.arange(outputs.size(1), device=outputs.device)[None, :] < lengths[
-            :, None
-        ].to(outputs.device)
-        scores = self.attn_v(torch.tanh(self.attn_w(outputs))).squeeze(-1)
-        scores = scores.masked_fill(~mask, float("-inf"))
-        weights = torch.softmax(scores, dim=1)
-        context = torch.bmm(weights.unsqueeze(1), outputs).squeeze(1)
-
-        context = self.dropout(context)
-        logits = self.fc(context)
+        # Use last layer's hidden state, concatenate both directions
+        if self.lstm.bidirectional:
+            last_fwd = h_n[-2, :, :]  # (B, H)
+            last_bwd = h_n[-1, :, :]  # (B, H)
+            h = torch.cat([last_fwd, last_bwd], dim=1)
+        else:
+            h = h_n[-1, :, :]
+        h = self.dropout(h)
+        logits = self.fc(h)  # (B, num_classes)
         return logits
 
 
