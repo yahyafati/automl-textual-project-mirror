@@ -584,7 +584,12 @@ class Optimizer(ABC):
         # weights the final epoch happens to leave behind, while
         # `train_result["val_accuracy"]` would keep reporting the earlier
         # peak -- silently mismatching what's actually predicted.
-        best_ckpt_path = self.checkpoint_dir / "incumbent_eval_best.pt"
+        #
+        # Derived from `state_dict_filename` (already unique per incumbent
+        # when called in a loop over an ensemble -- see `_finalize_optimization`)
+        # rather than a fixed name, so concurrent/ensemble calls don't clobber
+        # each other's best-epoch checkpoint.
+        best_ckpt_path = self.checkpoint_dir / f"{Path(state_dict_filename).stem}_eval_best.pt"
 
         with approach.with_mode("eval") as _approach:
             prepared = _approach.prepare(train_split, test_split)
