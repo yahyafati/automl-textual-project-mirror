@@ -31,7 +31,6 @@ from automl.core.utils.misc import (
     atomic_torch_save,
     get_device,
     numpy_and_config_encoder,
-    set_seed,
     save_incumbent,
 )
 from automl.logger import get_logger
@@ -86,7 +85,6 @@ class Optimizer(ABC):
         self.trainer_checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         register_all_approaches()
-        set_seed(runtime_config["seed"])
 
     @staticmethod
     def _resolve_devices(runtime_config: RuntimeConfig) -> list[torch.device]:
@@ -473,8 +471,6 @@ class Optimizer(ABC):
             )
 
             with approach.with_mode("train") as _approach:
-                with self._state_lock:
-                    set_seed(seed)
                 prepared_result = _approach.prepare(train_split, val_split)
 
                 with timer.Timer() as t:
