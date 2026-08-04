@@ -18,7 +18,6 @@ from automl.core.registry import register_approach
 from automl.core.trainers.torch_trainer import TorchTrainer
 from automl.core.types import DatasetSplit, PredictionResult, TrainResult
 from automl.core.utils import timer
-from automl.core.utils.misc import set_seed
 from automl.logger import get_logger
 
 logger = get_logger()
@@ -100,9 +99,6 @@ class TfidfFFNNApproach(Approach[torch.nn.Module, _PreparationResult]):
         return self.representation in ["char", "hybrid"]
 
     def initialize(self):
-        seed = self.get_param_value("seed")
-        set_seed(seed)
-
         max_features = self.get_param_value("vocab_size")
         ngram_range = tuple((1, self.get_param_value("ngram_max")))
         analyzer = self.get_param_value("analyzer")

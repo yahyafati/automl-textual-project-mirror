@@ -42,6 +42,25 @@ TRANSFORMER_DEFAULT_CONFIG = {
 
 TFIDF_FFNN_DEFAULT_CONFIG = {
     "max_grad_norm": 1.0,
+    "hidden_dim": 128,
+    "learning_rate": 1e-3,
+    "optimizer": "adamw",
+    "beta1": 0.9,
+    "beta2": 0.999,
+    "momentum": 0.9,
+    "vocab_size": 10_000,
+    "ngram_max": 1,
+    "analyzer": "word",
+    "stop_words": None,
+    "min_df": 1,
+    "max_df": 1.0,
+    "sublinear_tf": False,
+    "use_idf": True,
+    "norm": "l2",
+    "representation": "word",
+    "char_ngram_min": 2,
+    "char_ngram_max": 5,
+    "class_balance": False,
 }
 
 
