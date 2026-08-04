@@ -111,18 +111,19 @@ class BiLSTMClassifier(nn.Module):
         dropout: float = 0.5,
         bidirectional: bool = True,
         pretrained_embeddings: Optional[torch.Tensor] = None,
+        padding_idx: int = 0
     ):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=padding_idx)
         if pretrained_embeddings is not None:
             with torch.no_grad():
                 self.embedding.weight.copy_(pretrained_embeddings)
-                self.embedding.weight[0].zero_()  # keep padding_idx row zero
+                self.embedding.weight[padding_idx].zero_()  # keep padding_idx row zero
         self.lstm = nn.LSTM(
             input_size=embed_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
-            batch_first=True,
+            batch_first=True, # (B, L, E) instead of (L, B, E)
             bidirectional=bidirectional,
             dropout=dropout if num_layers > 1 else 0.0,
         )
@@ -131,11 +132,27 @@ class BiLSTMClassifier(nn.Module):
         self.fc = nn.Linear(hidden_dim * directions, num_classes)
 
     def forward(self, input_ids):
+        # B - batch size
+        # L - sequence length
+        # E - embedding dimension
+        # H - hidden dimension
+
+        # input_ids: BxL
+        # lengths: B
+
+        # Counts non-padding tokens per sequence to get true lengths
+        # (clamped to at least 1, so an all-padding row doesn't break packing).
         lengths = (input_ids != self.embedding.padding_idx).sum(dim=1).clamp(min=1)
 
         emb = self.embedding(input_ids)  # (B, L, E)
+
+        # Packs the embeddings so the LSTM skips computation over padding and — importantly — so the
+        # "final hidden state" it returns corresponds to the last real token, not the last padding token.
         packed = pack_padded_sequence(
-            emb, lengths.cpu(), batch_first=True, enforce_sorted=False
+            emb,
+            lengths.cpu(),
+            batch_first=True,
+            enforce_sorted=False,
         )
         _, (h_n, c_n) = self.lstm(packed)  # h_n: (num_layers*D, B, H)
 
@@ -298,6 +315,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             dropout=dropout,
             bidirectional=True,
             pretrained_embeddings=pretrained_embeddings,
+            padding_idx=self._pad_id,
         )
         assert self.model is not None
         self.model.to(self._device)
