@@ -3,7 +3,9 @@ from __future__ import annotations
 from ConfigSpace import (
     Categorical,
     ConfigurationSpace,
+    EqualsCondition,
     Float,
+    InCondition,
     Integer,
     Constant,
 )
@@ -44,6 +46,8 @@ def build_config_space(
         dropout,
         scheduler,
     ]
+
+    conditions: list = []
 
     if fixed_model_type == "sequence-dl":
         hidden_dim = Integer("hidden_dim", (32, 256), log=True, default=128)
@@ -93,11 +97,70 @@ def build_config_space(
             freeze_ratio,
         ]
 
+    elif fixed_model_type == "tfidf-ffnn":
+        hidden_dim = Integer("hidden_dim", (32, 256), log=True, default=128)
+        learning_rate = Float("learning_rate", (1e-4, 1e-2), default=1e-3, log=True)
+        optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adamw")
+
+        # optimizer-specific params, only active for the optimizers that use them
+        beta1 = Float("beta1", (0.8, 0.999), default=0.9)
+        beta2 = Float("beta2", (0.9, 0.9999), default=0.999)
+        momentum = Float("momentum", (0.0, 0.99), default=0.9)
+
+        # --- TF-IDF vectorization params ---
+        vocab_size = Integer("vocab_size", (1_000, 50_000), log=True, default=10_000)
+        ngram_max = Integer("ngram_max", (1, 3), default=1)
+        analyzer = Categorical("analyzer", ["word", "char", "char_wb"], default="word")
+        stop_words = Categorical("stop_words", [None, "english"], default=None)
+        min_df = Integer("min_df", (1, 10), default=1)
+        max_df = Float("max_df", (0.5, 1.0), default=1.0)
+        sublinear_tf = Categorical("sublinear_tf", [True, False], default=False)
+        use_idf = Categorical("use_idf", [True, False], default=True)
+        norm = Categorical("norm", [None, "l1", "l2"], default="l2")
+        representation = Categorical(
+            "representation", ["word", "char", "hybrid"], default="word"
+        )
+        # ranges chosen so char_ngram_min <= char_ngram_max always holds
+        char_ngram_min = Integer("char_ngram_min", (2, 3), default=2)
+        char_ngram_max = Integer("char_ngram_max", (3, 6), default=5)
+        class_balance = Categorical("class_balance", [True, False], default=False)
+
+        hyperparams += [
+            hidden_dim,
+            learning_rate,
+            optimizer,
+            beta1,
+            beta2,
+            momentum,
+            vocab_size,
+            ngram_max,
+            analyzer,
+            stop_words,
+            min_df,
+            max_df,
+            sublinear_tf,
+            use_idf,
+            norm,
+            representation,
+            char_ngram_min,
+            char_ngram_max,
+            class_balance,
+        ]
+
+        conditions += [
+            InCondition(beta1, optimizer, ["adam", "adamw"]),
+            InCondition(beta2, optimizer, ["adam", "adamw"]),
+            EqualsCondition(momentum, optimizer, "sgd"),
+        ]
+
     else:
         raise ValueError(
             f"Unknown fixed_model_type for config space: {fixed_model_type!r}"
         )
 
     cs.add(hyperparams)
+
+    if conditions:
+        cs.add(conditions)
 
     return cs
