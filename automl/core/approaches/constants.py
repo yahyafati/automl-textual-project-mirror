@@ -40,10 +40,16 @@ TRANSFORMER_DEFAULT_CONFIG = {
 }
 
 
+TFIDF_FFNN_DEFAULT_CONFIG = {
+    "max_grad_norm": 1.0,
+}
+
+
 DEFAULTS: dict[ApproachName | Literal["common"], dict[str, Any]] = {
     "common": COMMON_CONFIG,
     "sequence-dl": SEQUENCE_DL_DEFAULT_CONFIG,
     "transformer": TRANSFORMER_DEFAULT_CONFIG,
+    "tfidf-ffnn": TFIDF_FFNN_DEFAULT_CONFIG,
 }
 
 

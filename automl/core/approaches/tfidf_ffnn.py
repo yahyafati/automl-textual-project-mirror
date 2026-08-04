@@ -90,6 +90,10 @@ class TfidfFFNNApproach(Approach[torch.nn.Module, _PreparationResult]):
         self.char_vectorizer: TfidfVectorizer | None = None
         self.representation: str = "word"
         self.trainer: Optional[TorchTrainer] = None
+        self._stochastic_epochs: bool = bool(kwargs.get("stochastic_epochs", False))
+        self._stochastic_epoch_fraction: Optional[float] = kwargs.get(
+            "stochastic_epoch_fraction", None
+        )
 
     @property
     def use_char_ngrams(self):
@@ -274,8 +278,12 @@ class TfidfFFNNApproach(Approach[torch.nn.Module, _PreparationResult]):
         self,
         prepared_result: _PreparationResult,
         *,
-        trainer_load_path: Optional[Path] = None,
         epochs: int = 50,
+        load_path: Optional[Path] = None,
+        save_path: Optional[Path] = None,
+        trainer_load_path: Optional[Path] = None,
+        evaluate_validation: bool = True,
+        max_time_seconds: Optional[float] = None,
         **kwargs,
     ) -> TrainResult:
         logger.debug("Starting TF-IDF model training...")
@@ -293,7 +301,27 @@ class TfidfFFNNApproach(Approach[torch.nn.Module, _PreparationResult]):
         elif optimizer_name == "sgd":
             opt_kwargs["momentum"] = self.get_param_value("momentum")
 
-        with timer.Timer("TFIDF FFNN Approach Training") as t:
+        scheduler = self.get_param_value("scheduler")
+        warmup_ratio = float(self.get_param_value("warmup_ratio"))
+        max_grad_norm = float(self.get_param_value("max_grad_norm"))
+
+        # `load_path` and `trainer_load_path` are aliases for the same
+        # checkpoint path - the optimizer passes both since different
+        # approaches historically named this kwarg differently.
+        resolved_load_path = load_path if load_path is not None else trainer_load_path
+
+        logger.debug(
+            f"[{self.name}] train(): optimizer={optimizer_name}, "
+            f"scheduler={scheduler}, warmup_ratio={warmup_ratio}, "
+            f"max_grad_norm={max_grad_norm}, epochs={epochs}, "
+            f"evaluate_validation={evaluate_validation}, "
+            f"load_path={resolved_load_path}."
+        )
+
+        if self.trainer is None:
+            logger.debug(
+                f"[{self.name}] No existing trainer; creating a new TorchTrainer."
+            )
             trainer = TorchTrainer(
                 prepared_result["model"],
                 self.name,
@@ -302,10 +330,27 @@ class TfidfFFNNApproach(Approach[torch.nn.Module, _PreparationResult]):
                 self._device,
                 optimizer=optimizer_name,
                 optimizer_args=opt_kwargs,
+                scheduler=scheduler,
                 epochs=epochs,
+                evaluate_validation=evaluate_validation,
+                max_grad_norm=max_grad_norm,
+                warmup_ratio=warmup_ratio,
+                stochastic_epochs=self._stochastic_epochs,
+                stochastic_epoch_fraction=self._stochastic_epoch_fraction,
+                max_time_seconds=max_time_seconds,
             )
             self.trainer = trainer
-            result = trainer.train(load_path=trainer_load_path)
+        else:
+            logger.debug(
+                f"[{self.name}] Reusing existing trainer for continued training."
+            )
+
+        assert self.trainer is not None
+        with timer.Timer("TFIDF FFNN Approach Training") as t:
+            result = self.trainer.train(
+                load_path=resolved_load_path,
+                save_path=save_path,
+            )
         logger.debug(
             "Training completed in %.2fs. Best metric: %.4f",
             t.execution_time,
