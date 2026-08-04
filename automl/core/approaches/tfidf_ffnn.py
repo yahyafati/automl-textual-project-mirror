@@ -13,6 +13,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
+from automl.core.approaches import tfidf_cache
 from automl.core.approaches.base_approach import Approach
 from automl.core.registry import register_approach
 from automl.core.trainers.torch_trainer import TorchTrainer
@@ -87,6 +88,7 @@ class TfidfFFNNApproach(Approach[torch.nn.Module, _PreparationResult]):
         logger.debug("Initializing TfidfApproach...")
         self.vectorizer: TfidfVectorizer | None = None
         self.char_vectorizer: TfidfVectorizer | None = None
+        self._train_cache_key: Optional[str] = None
         self.representation: str = "word"
         self.trainer: Optional[TorchTrainer] = None
         self._stochastic_epochs: bool = bool(kwargs.get("stochastic_epochs", False))
@@ -162,25 +164,28 @@ class TfidfFFNNApproach(Approach[torch.nn.Module, _PreparationResult]):
 
     def prepare_training(self, train: DatasetSplit):
         assert self.vectorizer is not None
-        X_train = self.vectorizer.fit_transform(train.texts)
+        char_vectorizer = self.char_vectorizer if self.use_char_ngrams else None
+        X_train, vectorizer, char_vectorizer, train_key = tfidf_cache.get_or_fit_train(
+            self.vectorizer, char_vectorizer, train.texts
+        )
+        self.vectorizer = vectorizer
         if self.use_char_ngrams:
-            assert self.char_vectorizer is not None
-            X_train_char = self.char_vectorizer.fit_transform(train.texts)
-            X_train = sp.hstack([X_train, X_train_char])
+            self.char_vectorizer = char_vectorizer
+        self._train_cache_key = train_key
 
-        X_train = X_train.tocsr()
         y_train = np.array(train.labels, dtype=np.int64)
         return X_train, y_train
 
     def prepare_validation(self, val: DatasetSplit):
         assert self.vectorizer is not None
-        X_val = self.vectorizer.transform(val.texts)
-        if self.use_char_ngrams:
-            assert self.char_vectorizer is not None
-            X_val_char = self.char_vectorizer.transform(val.texts)
-            X_val = sp.hstack([X_val, X_val_char])
-
-        X_val = X_val.tocsr()
+        assert self._train_cache_key is not None, (
+            "prepare_training() must run before prepare_validation() so the "
+            "vectorizer is fitted."
+        )
+        char_vectorizer = self.char_vectorizer if self.use_char_ngrams else None
+        X_val = tfidf_cache.get_or_transform(
+            self._train_cache_key, self.vectorizer, char_vectorizer, val.texts
+        )
         y_val = np.array(val.labels, dtype=np.int64)
         return X_val, y_val
 
