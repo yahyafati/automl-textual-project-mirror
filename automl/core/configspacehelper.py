@@ -65,6 +65,7 @@ def build_config_space(
             ],
             default="distilbert-base-uncased",
         )
+        class_balance = Categorical("class_balance", [True, False], default=False)
 
         hyperparams += [
             hidden_dim,
@@ -73,6 +74,7 @@ def build_config_space(
             seq_embed_dim,
             seq_num_layers,
             seq_pretrained_model_name,
+            class_balance,
         ]
 
     elif fixed_model_type == "transformer":

@@ -2,12 +2,14 @@ from functools import lru_cache, partial
 from pathlib import Path
 from typing import Union, Optional
 
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from ConfigSpace import Configuration
-from torch.utils.data import DataLoader
+from sklearn.utils.class_weight import compute_class_weight
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from transformers import PreTrainedTokenizerBase, AutoModel
 
 from automl.core.approaches.base_approach import Approach
@@ -229,6 +231,7 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         num_layers = int(self.get_param_value("seq_num_layers"))
         dropout = float(self.get_param_value("dropout"))
         batch_size = int(self.get_param_value("batch_size"))
+        check_balance = self.get_param_value("class_balance")
         self._model_name = self.get_param_value("seq_pretrained_model_name")
         self._tokenizer_path = f"{self.TOKENIZERS_DIR}/{self._model_name}"
         self._model_path = f"{self.MODELS_DIR}/{self._model_name}"
@@ -282,10 +285,27 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
 
         collate_fn = partial(collate_sequences, pad_value=self._pad_id)
 
+        sampler = None
+        shuffle = True
+        if check_balance:
+            train_labels_arr = np.asarray(train_labels)
+            class_weights = compute_class_weight(
+                "balanced", classes=np.unique(train_labels_arr), y=train_labels_arr
+            )
+            sample_weights = class_weights[train_labels_arr]
+            sampler = WeightedRandomSampler(
+                weights=torch.as_tensor(sample_weights, dtype=torch.double),
+                num_samples=len(train_labels_arr),
+                replacement=True,
+            )
+            shuffle = False  # mutually exclusive with sampler
+            logger.debug("Class balancing enabled via WeightedRandomSampler")
+
         train_loader = DataLoader(
             train_ds,
             batch_size=batch_size,
-            shuffle=True,
+            shuffle=shuffle,
+            sampler=sampler,
             num_workers=self._num_worker,
             pin_memory=self._device.type == "cuda",
             persistent_workers=self._num_worker > 0,

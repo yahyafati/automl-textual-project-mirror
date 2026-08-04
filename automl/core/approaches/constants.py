@@ -22,6 +22,7 @@ SEQUENCE_DL_DEFAULT_CONFIG = {
     "weight_decay": 0.01,
     "warmup_ratio": 0.1,
     "max_grad_norm": 1.0,
+    "class_balance": False,
 }
 
 
