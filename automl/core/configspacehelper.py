@@ -93,6 +93,32 @@ def build_config_space(
             freeze_ratio,
         ]
 
+    elif fixed_model_type == "simple":
+        hidden_dim = Integer("simple_hidden_dim", (16, 256), log=True, default=64)
+        learning_rate = Float("learning_rate", (1e-4, 1e-2), default=1e-3, log=True)
+        optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adamw")
+        simple_embed_dim = Integer("simple_embed_dim", (32, 300), log=True, default=100)
+        simple_num_layers = Integer("simple_num_layers", (1, 3), default=1)
+        simple_pretrained_model_name = Categorical(
+            "simple_pretrained_model_name",
+            [
+                "distilbert-base-uncased",
+                "bert-base-uncased",
+                "google/bert_uncased_L-4_H-512_A-8",
+                "microsoft/xtremedistil-l6-h256-uncased",
+            ],
+            default="distilbert-base-uncased",
+        )
+
+        hyperparams += [
+            hidden_dim,
+            learning_rate,
+            optimizer,
+            simple_embed_dim,
+            simple_num_layers,
+            simple_pretrained_model_name,
+        ]
+
     else:
         raise ValueError(
             f"Unknown fixed_model_type for config space: {fixed_model_type!r}"

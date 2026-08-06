@@ -6,7 +6,7 @@ from typing import TypedDict, Literal, List, Optional, Any
 import numpy as np
 import pandas as pd
 
-ApproachName = Literal["sequence-dl", "transformer"]
+ApproachName = Literal["sequence-dl", "transformer", "simple"]
 
 
 @dataclass
