@@ -17,6 +17,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     data_path=Path("data"),
     seed=int(datetime.datetime.now().timestamp() % 1e6),
     approach="sequence-dl",
+    approach_params={},
     evaluation_budget=5,
     max_budget=40,
     min_budget=5,
