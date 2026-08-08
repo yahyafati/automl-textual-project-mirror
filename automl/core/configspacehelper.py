@@ -28,13 +28,10 @@ def build_config_space(
     weight_decay = Float("weight_decay", (1e-6, 1e-2), default=1e-4, log=True)
     batch_size = Categorical("batch_size", [32, 64, 128, 256, 512], default=64)
 
-    max_seq_length = Integer("max_seq_length", (64, 256), log=True, default=128)
-
     warmup_ratio = Float("warmup_ratio", (0.0, 0.2), default=0.1)
 
     hyperparams: list[Hyperparameter] = [
         model_type,
-        max_seq_length,
         weight_decay,
         batch_size,
         warmup_ratio,

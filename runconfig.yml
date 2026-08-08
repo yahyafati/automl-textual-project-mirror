@@ -42,3 +42,4 @@ approach_params:
   seq_pretrained_model_name: distilbert-base-uncased
   optimizer: adamw
   scheduler: cosineannealinglr
+  max_seq_length: 180
