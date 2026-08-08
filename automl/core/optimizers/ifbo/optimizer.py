@@ -195,6 +195,33 @@ class IfboOptimizer(Optimizer):
     # -------------------------
 
     @staticmethod
+    def _numeric_categorical_spec(choices: tuple) -> HPSpec | None:
+        """
+        For a CategoricalHyperparameter whose choices are all real numbers (e.g.
+        batch_size=[32, 64, ..., 512]), encode as an ordered Integer/Float instead
+        of Categorical's unordered equal-width bins, so FT-PFN sees encoded
+        distances that reflect actual magnitude (log-scaled when all choices are
+        positive) rather than just choice-list position. Returns None for
+        non-numeric or degenerate (single-value) choice sets, so callers fall
+        back to plain Categorical encoding.
+        """
+        if len(choices) < 2:
+            return None
+        if not all(
+            isinstance(c, (int, float)) and not isinstance(c, bool) for c in choices
+        ):
+            return None
+
+        low, high = float(min(choices)), float(max(choices))
+        if low == high:
+            return None
+
+        log = low > 0
+        if all(isinstance(c, int) for c in choices):
+            return Integer(low=int(low), high=int(high), log=log)
+        return Float(low=low, high=high, log=log)
+
+    @staticmethod
     def _build_hp_space(cs: ConfigurationSpace) -> HyperparameterSpace:
         """
         Build a HyperparameterSpace encoder from a ConfigSpace.
@@ -222,7 +249,9 @@ class IfboOptimizer(Optimizer):
                     log=bool(getattr(hp, "log", False)),
                 )
             elif isinstance(hp, CategoricalHyperparameter):
-                specs[name] = Categorical(tuple(hp.choices))
+                specs[name] = IfboOptimizer._numeric_categorical_spec(
+                    hp.choices
+                ) or Categorical(tuple(hp.choices))
             else:
                 raise ValueError(
                     f"[IfboOptimizer] Unsupported hyperparameter type for ifBO "
