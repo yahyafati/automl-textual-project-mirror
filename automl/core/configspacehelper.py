@@ -26,12 +26,7 @@ def build_config_space(
     # --- hyperparameters shared by every approach (consumed generically by
     dropout = Float("dropout", (0.0, 0.5), default=0.2)
     weight_decay = Float("weight_decay", (1e-6, 1e-2), default=1e-4, log=True)
-    scheduler = Categorical(
-        "scheduler",
-        ["steplr", "cosineannealinglr", "exponentiallr", "reducelronplateau"],
-        default="cosineannealinglr",
-    )
-    batch_size = Integer("batch_size", (32, 512), log=True, default=64)
+    batch_size = Categorical("batch_size", [32, 64, 128, 256, 512], default=64)
 
     max_seq_length = Integer("max_seq_length", (64, 256), log=True, default=128)
 
@@ -44,36 +39,22 @@ def build_config_space(
         batch_size,
         warmup_ratio,
         dropout,
-        scheduler,
     ]
 
     conditions: list = []
 
     if fixed_model_type == "sequence-dl":
-        hidden_dim = Integer("hidden_dim", (32, 256), log=True, default=128)
+        hidden_dim = Categorical("hidden_dim", [32, 64, 128, 256], default=128)
         learning_rate = Float("learning_rate", (1e-4, 1e-2), default=1e-3, log=True)
-        optimizer = Categorical("optimizer", ["adam", "adamw", "sgd"], default="adamw")
-        seq_embed_dim = Integer("seq_embed_dim", (32, 512), log=True, default=128)
-        seq_num_layers = Integer("seq_num_layers", (1, 3), default=1)
-        seq_pretrained_model_name = Categorical(
-            "seq_pretrained_model_name",
-            [
-                "distilbert-base-uncased",
-                "bert-base-uncased",
-                "google/bert_uncased_L-4_H-512_A-8",
-                "microsoft/xtremedistil-l6-h256-uncased",
-            ],
-            default="distilbert-base-uncased",
-        )
+        seq_embed_dim = Categorical("seq_embed_dim", [32, 48, 64, 128, 256, 512], default=128)
+        seq_num_layers = Integer("seq_num_layers", (1, 5), default=1)
         class_balance = Categorical("class_balance", [True, False], default=False)
 
         hyperparams += [
             hidden_dim,
             learning_rate,
-            optimizer,
             seq_embed_dim,
             seq_num_layers,
-            seq_pretrained_model_name,
             class_balance,
         ]
 

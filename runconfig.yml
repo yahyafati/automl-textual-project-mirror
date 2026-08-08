@@ -37,3 +37,8 @@ stochastic_epoch_fraction: 0.5
 ifbo_thaw_step: 1
 
 evaluate_incumbent: true
+
+approach_params:
+  seq_pretrained_model_name: distilbert-base-uncased
+  optimizer: adamw
+  scheduler: cosineannealinglr

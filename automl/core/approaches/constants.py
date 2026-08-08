@@ -5,8 +5,9 @@ from automl.core.types import ApproachName
 COMMON_CONFIG: dict[str, Any] = {
     # --- reproducibility ---
     "seed": 42,
+    "optimizer": "adamw",
     "scheduler_step_size": None,
-    "scheduler": None,
+    "scheduler": "cosineannealinglr",
     "scheduler_gamma": None,
 }
 
@@ -17,12 +18,12 @@ SEQUENCE_DL_DEFAULT_CONFIG = {
     "seq_num_layers": 1,
     "dropout": 0.5,
     "batch_size": 64,
-    "optimizer": "adamw",
     "learning_rate": 1e-3,
     "weight_decay": 0.01,
     "warmup_ratio": 0.1,
     "max_grad_norm": 1.0,
     "class_balance": False,
+    "seq_pretrained_model_name": "distilbert-base-uncased"
 }
 
 
@@ -33,7 +34,6 @@ TRANSFORMER_DEFAULT_CONFIG = {
     "freeze_ratio": 0.0,
     "batch_size": 32,
     "epochs": 5,
-    "optimizer": "adamw",
     "learning_rate": 2e-5,
     "weight_decay": 0.01,
     "warmup_ratio": 0.1,
@@ -45,7 +45,6 @@ TFIDF_FFNN_DEFAULT_CONFIG = {
     "max_grad_norm": 1.0,
     "hidden_dim": 128,
     "learning_rate": 1e-3,
-    "optimizer": "adamw",
     "beta1": 0.9,
     "beta2": 0.999,
     "momentum": 0.9,
