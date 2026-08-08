@@ -45,14 +45,12 @@ def build_config_space(
         learning_rate = Float("learning_rate", (1e-4, 1e-2), default=1e-3, log=True)
         seq_embed_dim = Categorical("seq_embed_dim", [32, 48, 64, 128, 256, 512], default=128)
         seq_num_layers = Integer("seq_num_layers", (1, 5), default=1)
-        class_balance = Categorical("class_balance", [True, False], default=False)
 
         hyperparams += [
             hidden_dim,
             learning_rate,
             seq_embed_dim,
             seq_num_layers,
-            class_balance,
         ]
 
     elif fixed_model_type == "transformer":

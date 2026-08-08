@@ -43,3 +43,4 @@ approach_params:
   optimizer: adamw
   scheduler: cosineannealinglr
   max_seq_length: 180
+  class_balance: true
