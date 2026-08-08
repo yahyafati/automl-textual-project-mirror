@@ -1,6 +1,6 @@
 import dataclasses
 from pathlib import Path
-from typing import TypedDict, Optional
+from typing import TypedDict, Optional, Any
 
 from automl.core.types import ApproachName
 
@@ -16,6 +16,7 @@ class RuntimeConfig(TypedDict):
     data_path: Path
     seed: int
     approach: ApproachName
+    approach_params: dict[str, Any]
 
     evaluation_budget: int
     max_budget: int

@@ -468,6 +468,7 @@ class Optimizer(ABC):
                 stochastic_epoch_fraction=self.runtime_config[
                     "stochastic_epoch_fraction"
                 ],
+                approach_params=self.runtime_config.get("approach_params"),
             )
 
             with approach.with_mode("train") as _approach:
@@ -588,9 +589,12 @@ class Optimizer(ABC):
             num_workers=self.runtime_config["num_workers"],
             stochastic_epochs=self.runtime_config["stochastic_epochs"],
             stochastic_epoch_fraction=self.runtime_config["stochastic_epoch_fraction"],
+            approach_params=self.runtime_config.get("approach_params"),
         )
 
-        best_ckpt_path = self.checkpoint_dir / f"{Path(state_dict_filename).stem}_eval_best.pt"
+        best_ckpt_path = (
+            self.checkpoint_dir / f"{Path(state_dict_filename).stem}_eval_best.pt"
+        )
 
         with approach.with_mode("eval") as _approach:
             prepared = _approach.prepare(train_split, test_split)

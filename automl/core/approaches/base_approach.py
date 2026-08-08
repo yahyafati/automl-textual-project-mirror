@@ -45,11 +45,14 @@ class Approach(ABC, Generic[TModel, TPreparationResult]):
         config: Union[Configuration, dict],
         num_classes: int,
         device: Optional[torch.device] = None,
+        approach_params: Optional[dict[str, Any]] = None,
         **kwargs,
     ) -> None:
         self._mode: Mode = "train"
         self._device: torch.device = device or get_device()
         self._params: dict[str, Any] = dict(config)
+        self._approach_params: dict[str, Any] = dict(approach_params or {})
+        self._params.update(self._approach_params)
         self._num_classes: int = num_classes
         self.model: Optional[TModel] = None
         self.trainer: Optional[Trainer] = None
@@ -65,6 +68,8 @@ class Approach(ABC, Generic[TModel, TPreparationResult]):
     ):
         if param_name in self._params:
             value = self._params[param_name]
+        elif param_name in self._approach_params:
+            value = self._approach_params[param_name]
         elif param_name in self._default_params:
             logger.debug(f"Using default value for parameter '{param_name}': {default}")
             value = self._default_params.get(param_name, default)
