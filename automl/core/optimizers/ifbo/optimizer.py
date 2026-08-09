@@ -411,21 +411,27 @@ class IfboOptimizer(Optimizer):
             for c in self.candidates
             if c.steps_done < self.b_max and c.uid not in excluded_uids
         ]
+        new_candidate = self._sample_new_candidate()
+        pending += [new_candidate]
 
-        if not pending:
-            self.logger.debug(
-                "No pending candidates left this round (all maxed out or "
-                "excluded) - sampling a new one."
-            )
-            candidate = self._sample_new_candidate()
-            self.candidates.append(candidate)
-            return candidate
+        # if not pending:
+        #     self.logger.debug(
+        #         "No pending candidates left this round (all maxed out or "
+        #         "excluded) - sampling a new one."
+        #     )
+        #     candidate = self._sample_new_candidate()
+        #     self.candidates.append(candidate)
+        #     return candidate
 
         # For baselines
         if self.ifbo_use_random_selection:
-            return self._rng.choice(pending)
+            selected = self._rng.choice(pending)
+            if selected is new_candidate:
+                self.logger.debug("Selected new candidate through random selection")
+                self.candidates.append(selected)
+            return selected
 
-        MAX_LOOKAHEAD = 5
+        MAX_LOOKAHEAD = self.b_max
         f_best = self._best_so_far_accuracy()
         h_rand = min(self._rng.randint(1, self.b_max), MAX_LOOKAHEAD)
         tau_rand = 10 ** self._rng.uniform(-4, -1)
@@ -462,6 +468,10 @@ class IfboOptimizer(Optimizer):
 
         # Free inference-related variables right away
         del query, predictions, T_tensor
+
+        if selected is new_candidate:
+            self.logger.debug("Selected new candidate through MFPI acquisition selection")
+            self.candidates.append(selected)
 
         return selected
 
