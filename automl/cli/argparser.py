@@ -108,6 +108,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--ifbo-use-random-selection",
+        default=None,
         action="store_true",
         help="Use random selection for ifBO candidates.",
     )
