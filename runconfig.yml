@@ -36,6 +36,16 @@ stochastic_epoch_fraction: 0.5
 
 ifbo_thaw_step: 1
 
+# Global stop conditions for the ifBO loop, checked once per step
+# (sequential) / dispatch round (parallel). null = disabled.
+ifbo_max_wallclock_time: null
+ifbo_patience: null
+# Per-candidate: exclude a candidate from future selection once its best
+# accuracy plateaus for this many consecutive steps. null = disabled.
+ifbo_plateau_patience: null
+# Minimum accuracy improvement to reset ifbo_patience / ifbo_plateau_patience.
+ifbo_min_delta: 0.001
+
 evaluate_incumbent: true
 
 approach_params:

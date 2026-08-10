@@ -38,6 +38,10 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     ifbo_incumbent_ensemble_top_k=3,
     ifbo_incumbent_ensemble_accuracy_threshold=0.05,
     ifbo_thaw_step=1,
+    ifbo_max_wallclock_time=None,
+    ifbo_patience=None,
+    ifbo_plateau_patience=None,
+    ifbo_min_delta=0.001,
 )
 
 
@@ -149,6 +153,36 @@ def create_parser() -> argparse.ArgumentParser:
         "--ifbo-thaw-step",
         type=int,
         help="Number of steps to thaw each candidate in ifBO.",
+    )
+    parser.add_argument(
+        "--ifbo-max-wallclock-time",
+        type=float,
+        help="Wall-clock cap (seconds) on the whole ifBO optimization loop. "
+        "Checked once per step (sequential) / dispatch round (parallel). "
+        "Default: None (no cap).",
+    )
+    parser.add_argument(
+        "--ifbo-patience",
+        type=int,
+        help="Stop the whole ifBO run early if best-so-far validation "
+        "accuracy hasn't improved by more than --ifbo-min-delta for this "
+        "many steps (sequential) / dispatch rounds (parallel). "
+        "Default: None (disabled).",
+    )
+    parser.add_argument(
+        "--ifbo-plateau-patience",
+        type=int,
+        help="Exclude an individual candidate from future selection once "
+        "its own best validation accuracy hasn't improved by more than "
+        "--ifbo-min-delta for this many consecutive steps. "
+        "Default: None (disabled).",
+    )
+    parser.add_argument(
+        "--ifbo-min-delta",
+        type=float,
+        help="Minimum absolute validation-accuracy improvement to reset "
+        "the --ifbo-patience / --ifbo-plateau-patience counters. "
+        "Default: 0.001.",
     )
 
     return parser

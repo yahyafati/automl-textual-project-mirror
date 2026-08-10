@@ -46,3 +46,7 @@ class RuntimeConfig(TypedDict):
     ifbo_incumbent_ensemble_top_k: int
     ifbo_incumbent_ensemble_accuracy_threshold: float
     ifbo_thaw_step: int
+    ifbo_max_wallclock_time: Optional[float]
+    ifbo_patience: Optional[int]
+    ifbo_plateau_patience: Optional[int]
+    ifbo_min_delta: float

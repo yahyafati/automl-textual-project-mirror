@@ -5,6 +5,7 @@ import itertools
 import math
 import os.path
 import random
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Optional
 
@@ -69,6 +70,37 @@ class IfboOptimizer(Optimizer):
         )
         self._thaw_step: int = runtime_config.get("ifbo_thaw_step", 1)
 
+        # Global stop conditions for the whole ifBO loop.
+        self.max_wallclock_time: Optional[float] = runtime_config.get(
+            "ifbo_max_wallclock_time"
+        )
+        if self.max_wallclock_time is not None and self.max_wallclock_time <= 0:
+            raise ValueError(
+                "[IfboOptimizer] ifbo_max_wallclock_time must be > 0, got "
+                f"{self.max_wallclock_time}."
+            )
+        self.patience: Optional[int] = runtime_config.get("ifbo_patience")
+        if self.patience is not None and self.patience < 1:
+            raise ValueError(
+                f"[IfboOptimizer] ifbo_patience must be >= 1, got {self.patience}."
+            )
+
+        # Per-candidate plateau detection: excludes a stalled candidate from
+        # future selection (see _update_plateau_state / _select_next_candidate).
+        self.plateau_patience: Optional[int] = runtime_config.get(
+            "ifbo_plateau_patience"
+        )
+        if self.plateau_patience is not None and self.plateau_patience < 1:
+            raise ValueError(
+                "[IfboOptimizer] ifbo_plateau_patience must be >= 1, got "
+                f"{self.plateau_patience}."
+            )
+        self.min_delta: float = float(runtime_config.get("ifbo_min_delta", 0.001))
+        if self.min_delta < 0:
+            raise ValueError(
+                f"[IfboOptimizer] ifbo_min_delta must be >= 0, got {self.min_delta}."
+            )
+
         if self.incumbent_ensemble_top_k < 1:
             raise ValueError(
                 "[IfboOptimizer] ifbo_incumbent_ensemble_top_k must be >= 1, "
@@ -95,7 +127,8 @@ class IfboOptimizer(Optimizer):
             "[IfboOptimizer] Initialized with dynamic candidates, budgets in [%d, %d], "
             "b_max=%d, total_steps=%d, hp_dim=%d, initial_epsilon=%.4f, "
             "ifbo_use_random_selection=%s, greedy_selection=%s, "
-            "incumbent_ensemble_top_k=%d, incumbent_ensemble_accuracy_threshold=%.4f",
+            "incumbent_ensemble_top_k=%d, incumbent_ensemble_accuracy_threshold=%.4f, "
+            "max_wallclock_time=%s, patience=%s, plateau_patience=%s, min_delta=%.4f",
             self.min_budget,
             self.max_budget,
             self.b_max,
@@ -106,6 +139,10 @@ class IfboOptimizer(Optimizer):
             self.greedy_selection,
             self.incumbent_ensemble_top_k,
             self.incumbent_ensemble_accuracy_threshold,
+            self.max_wallclock_time,
+            self.patience,
+            self.plateau_patience,
+            self.min_delta,
         )
 
         # Load FT-PFN surrogate model
@@ -346,18 +383,56 @@ class IfboOptimizer(Optimizer):
             if e["epoch"] > prev_budget and e["epoch"] >= self.min_budget
         ]
 
+        appended_ys: list[float] = []
         if not new_epochs:
             y = float("nan") if math.isnan(val_error) else 1.0 - float(val_error)
             cand.ts.append(cand.steps_done / self.b_max)
             cand.ys.append(y)
-            return
+            appended_ys.append(y)
+        else:
+            for e in new_epochs:
+                step = e["epoch"] - self.min_budget + 1
+                t = step / self.b_max  # normalized time in [0, 1]
+                y_val = e["val_accuracy"]
+                y = float(y_val) if y_val is not None else float("nan")
+                cand.ts.append(t)
+                cand.ys.append(y)
+                appended_ys.append(y)
 
-        for e in new_epochs:
-            step = e["epoch"] - self.min_budget + 1
-            t = step / self.b_max  # normalized time in [0, 1]
-            y = e["val_accuracy"]
-            cand.ts.append(t)
-            cand.ys.append(float(y) if y is not None else float("nan"))
+        self._update_plateau_state(cand, appended_ys)
+
+    def _update_plateau_state(self, cand: _IfBOCandidate, new_ys: list[float]) -> None:
+        """
+        Track per-candidate improvement to detect a plateaued validation-
+        accuracy curve. A candidate whose best observed accuracy hasn't
+        improved by more than `ifbo_min_delta` for `ifbo_plateau_patience`
+        consecutive steps is marked `stopped` and excluded from future
+        selection (see `_select_next_candidate`) - freeze-thaw budget is
+        better spent thawing candidates that are still improving. A stopped
+        candidate remains eligible as an incumbent based on its best
+        observed accuracy.
+        """
+        finite_new = [y for y in new_ys if math.isfinite(y)]
+        best_new = max(finite_new) if finite_new else float("-inf")
+
+        if best_new > cand.best_y + self.min_delta:
+            cand.best_y = best_new
+            cand.no_improve_steps = 0
+        else:
+            cand.no_improve_steps += 1
+
+        if (
+            self.plateau_patience is not None
+            and cand.no_improve_steps >= self.plateau_patience
+        ):
+            cand.stopped = True
+            self.logger.debug(
+                "[IfboOptimizer] Candidate uid=%d plateaued (no improvement "
+                "> %.4f for %d steps); excluding from future selection.",
+                cand.uid,
+                self.min_delta,
+                cand.no_improve_steps,
+            )
 
     def _step_on_device(
         self,
@@ -409,7 +484,9 @@ class IfboOptimizer(Optimizer):
         pending: list[_IfBOCandidate] = [
             c
             for c in self.candidates
-            if c.steps_done < self.b_max and c.uid not in excluded_uids
+            if c.steps_done < self.b_max
+            and c.uid not in excluded_uids
+            and not c.stopped
         ]
         new_candidate = self._sample_new_candidate()
         pending += [new_candidate]
@@ -470,7 +547,9 @@ class IfboOptimizer(Optimizer):
         del query, predictions, T_tensor
 
         if selected is new_candidate:
-            self.logger.debug("Selected new candidate through MFPI acquisition selection")
+            self.logger.debug(
+                "Selected new candidate through MFPI acquisition selection"
+            )
             self.candidates.append(selected)
 
         return selected
@@ -548,8 +627,33 @@ class IfboOptimizer(Optimizer):
         self,
     ) -> Optional[Configuration | list[Configuration]]:
         used_steps = 0
+        start_time = time.monotonic()
+        best_acc_for_patience = self._best_so_far_accuracy()
+        steps_since_improvement = 0
 
         while used_steps < self.total_steps:
+            if self.max_wallclock_time is not None and (
+                time.monotonic() - start_time >= self.max_wallclock_time
+            ):
+                self.logger.info(
+                    "[IfboOptimizer] Wall-clock budget of %.1fs exhausted. "
+                    "Stopping early at used_steps=%d.",
+                    self.max_wallclock_time,
+                    used_steps,
+                )
+                break
+
+            if self.patience is not None and steps_since_improvement >= self.patience:
+                self.logger.info(
+                    "[IfboOptimizer] Best-so-far accuracy plateaued: no "
+                    "improvement for %d steps (patience=%d). Stopping "
+                    "early at used_steps=%d.",
+                    steps_since_improvement,
+                    self.patience,
+                    used_steps,
+                )
+                break
+
             context = self._build_context()
             next_cand = self._select_next_candidate(context, used_steps + 1)
 
@@ -570,6 +674,13 @@ class IfboOptimizer(Optimizer):
             )
             self._step(next_cand)
             used_steps += 1
+
+            current_best = self._best_so_far_accuracy()
+            if current_best > best_acc_for_patience + self.min_delta:
+                best_acc_for_patience = current_best
+                steps_since_improvement = 0
+            else:
+                steps_since_improvement += 1
 
             # --- MEMORY CLEANUP: Clear resources tied up by the training step ---
             gc.collect()
@@ -594,9 +705,37 @@ class IfboOptimizer(Optimizer):
         self,
     ) -> Optional[Configuration | list[Configuration]]:
         used_steps = 0
+        start_time = time.monotonic()
+        best_acc_for_patience = self._best_so_far_accuracy()
+        rounds_since_improvement = 0
 
         with ThreadPoolExecutor(max_workers=self._parallelism) as executor:
             while used_steps < self.total_steps:
+                if self.max_wallclock_time is not None and (
+                    time.monotonic() - start_time >= self.max_wallclock_time
+                ):
+                    self.logger.info(
+                        "[IfboOptimizer] Wall-clock budget of %.1fs exhausted. "
+                        "Stopping early at used_steps=%d.",
+                        self.max_wallclock_time,
+                        used_steps,
+                    )
+                    break
+
+                if (
+                    self.patience is not None
+                    and rounds_since_improvement >= self.patience
+                ):
+                    self.logger.info(
+                        "[IfboOptimizer] Best-so-far accuracy plateaued: no "
+                        "improvement for %d dispatch rounds (patience=%d). "
+                        "Stopping early at used_steps=%d.",
+                        rounds_since_improvement,
+                        self.patience,
+                        used_steps,
+                    )
+                    break
+
                 context = self._build_context()
                 round_size = min(self._parallelism, self.total_steps - used_steps)
 
@@ -652,6 +791,13 @@ class IfboOptimizer(Optimizer):
                     raise
 
                 used_steps += len(batch)
+
+                current_best = self._best_so_far_accuracy()
+                if current_best > best_acc_for_patience + self.min_delta:
+                    best_acc_for_patience = current_best
+                    rounds_since_improvement = 0
+                else:
+                    rounds_since_improvement += 1
 
                 gc.collect()
                 if torch.cuda.is_available():

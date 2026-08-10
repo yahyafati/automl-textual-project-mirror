@@ -23,3 +23,12 @@ class IfBOCandidate:
     # the same checkpoint. Must stay separate from the per-step training
     # seed, which is free to vary.
     data_seed: int = 0
+    # Plateau tracking (see IfboOptimizer._update_plateau_state): best
+    # observed accuracy and how many consecutive steps since it last
+    # improved by more than ifbo_min_delta.
+    best_y: float = float("-inf")
+    no_improve_steps: int = 0
+    # Set once this candidate plateaus; excluded from future selection in
+    # IfboOptimizer._select_next_candidate but remains eligible as an
+    # incumbent based on its best observed accuracy.
+    stopped: bool = False
