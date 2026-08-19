@@ -32,7 +32,10 @@ class IfboOptimizer(Optimizer):
     - Dynamically samples candidate configurations from ConfigSpace.
     - Uses the FT-PFN surrogate (ifbo.FTPFN) to schedule which configuration
       to "thaw" next and at which (future) horizon, following MFPI-random.
-    - Each step corresponds to one call to `train_single_configuration`.
+    - Each step corresponds to one call to `train_single_configuration`,
+      time-boxed to at most `ifbo_thaw_step` seconds rather than a fixed
+      number of epochs -- the fidelity a candidate reaches per step depends
+      on how fast it trains.
     - Hyperparameters are encoded into [0,1]^d for FT-PFN using a simple
       type-aware scheme (float/int/log/categorical).
     """
@@ -67,7 +70,10 @@ class IfboOptimizer(Optimizer):
         self.incumbent_ensemble_top_k: int = runtime_config.get(
             "ifbo_incumbent_ensemble_top_k"
         )
-        self._thaw_step: int = runtime_config.get("ifbo_thaw_step", 1)
+        # Wall-clock budget (seconds) for a single freeze-thaw step: each
+        # call to `_step` trains its candidate for at most this long before
+        # freezing again, rather than for a fixed number of epochs.
+        self._thaw_step: float = float(runtime_config.get("ifbo_thaw_step", 1))
 
         if self.incumbent_ensemble_top_k < 1:
             raise ValueError(
@@ -274,30 +280,24 @@ class IfboOptimizer(Optimizer):
             )
         return ctx
 
-    def _step_to_budget(self, step: int) -> int:
-        """
-        Map freeze-thaw step index (1..b_max) to actual training budget (epochs).
-        step = 1 -> min_budget
-        step = b_max -> max_budget
-        """
-        if not (1 <= step <= self.b_max):
-            raise ValueError(
-                f"[IfboOptimizer] step_to_budget called with invalid step={step}, "
-                f"b_max={self.b_max}"
-            )
-        return self.min_budget + step - 1
-
     def _step(
         self,
         cand: _IfBOCandidate,
         device: Optional[torch.device] = None,
         num_workers: Optional[int] = None,
     ) -> None:
-        prev_budget = (
-            self._step_to_budget(cand.steps_done) if cand.steps_done > 0 else 0
-        )
-        cand.steps_done = min(cand.steps_done + self._thaw_step, self.b_max)
-        budget = self._step_to_budget(cand.steps_done)
+        """
+        Thaw `cand` for at most `self._thaw_step` seconds, then freeze it
+        again. Unlike a fixed epoch-count increment, how many epochs this
+        actually advances is only known after training returns (it depends
+        on how fast each epoch runs), so `cand.steps_done` /
+        `cand.epochs_done` are updated from the trainer's returned epoch
+        history rather than computed up front. Training is always requested
+        up to `max_budget` (resuming from the last checkpoint) so the same
+        LR schedule horizon is used across every thaw of a given candidate;
+        `max_time_seconds` is what actually bounds this call's duration.
+        """
+        prev_epoch = cand.epochs_done
 
         with self._state_lock:
             seed = self._rng.randint(1, 2**31 - 1)
@@ -305,16 +305,25 @@ class IfboOptimizer(Optimizer):
         val_error, epoch_history = self._train_single_configuration_with_history(
             config=cand.config,
             seed=seed,
-            budget=float(budget),
+            budget=float(self.max_budget),
             device=device,
             num_workers=num_workers,
             data_seed=cand.data_seed,
+            max_time_seconds=self._thaw_step,
+        )
+
+        if epoch_history:
+            cand.epochs_done = epoch_history[-1]["epoch"]
+        cand.steps_done = (
+            min(cand.epochs_done - self.min_budget + 1, self.b_max)
+            if cand.epochs_done >= self.min_budget
+            else 0
         )
 
         new_epochs = [
             e
             for e in epoch_history
-            if e["epoch"] > prev_budget and e["epoch"] >= self.min_budget
+            if e["epoch"] > prev_epoch and e["epoch"] >= self.min_budget
         ]
 
         if not new_epochs:
@@ -525,7 +534,7 @@ class IfboOptimizer(Optimizer):
                 )
                 break
             self.logger.debug(
-                "[IfboOptimizer] Selected candidate: %s for steps: %d",
+                "[IfboOptimizer] Selected candidate: %s for up to %.1fs",
                 next_cand.config,
                 self._thaw_step,
             )
@@ -561,7 +570,7 @@ class IfboOptimizer(Optimizer):
                 context = self._build_context()
                 round_size = min(self._parallelism, self.total_steps - used_steps)
 
-                batch: list[tuple[_IfBOCandidate, int]] = []
+                batch: list[tuple[_IfBOCandidate, float]] = []
                 selected_uids: set[int] = set()
                 for _ in range(round_size):
                     cand = self._select_next_candidate(

@@ -34,6 +34,10 @@ ifbo_incumbent_ensemble_accuracy_threshold: 0.05
 stochastic_epochs: false
 stochastic_epoch_fraction: 0.5
 
-ifbo_thaw_step: 1
+# Wall-clock cap (seconds) on a single ifBO freeze-thaw step; a candidate
+# trains for at most this long per step (resuming from its checkpoint)
+# instead of a fixed number of epochs. Tune to your hardware's per-epoch
+# training time.
+ifbo_thaw_step: 60
 
 evaluate_incumbent: true
