@@ -32,6 +32,7 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     num_parallel_trials=1,
     stochastic_epochs=False,
     stochastic_epoch_fraction=0.25,
+    truncation_augmentation=False,
     log_level="INFO",
     ifbo_use_random_selection=False,
     ifbo_greedy_candidate_selection=False,
@@ -127,6 +128,16 @@ def create_parser() -> argparse.ArgumentParser:
         type=float,
         help="Fraction of training batches to draw per epoch when "
         "--stochastic-epochs is set, in (0, 1]. Default: 0.25.",
+    )
+    parser.add_argument(
+        "--truncation-augmentation",
+        action="store_true",
+        default=None,
+        help="For training items whose tokenized length exceeds "
+        "max_seq_length, add left-truncated and center-truncated "
+        "(ellipsis) copies alongside the existing right-truncated one, "
+        "instead of only ever keeping the beginning of long texts. "
+        "Default: False (single right-truncated copy, as before).",
     )
     parser.add_argument(
         "--num-parallel-trials",

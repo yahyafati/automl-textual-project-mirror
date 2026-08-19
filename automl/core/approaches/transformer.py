@@ -138,6 +138,9 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
         self._stochastic_epoch_fraction: Optional[float] = kwargs.get(
             "stochastic_epoch_fraction", None
         )
+        self._truncation_augmentation: bool = bool(
+            kwargs.get("truncation_augmentation", False)
+        )
         self.model: Optional[TransformerClassifier] = None
         self.trainer: Optional[TorchTrainer] = None
         self.tokenizer: Optional[PreTrainedTokenizerBase] = None
@@ -199,16 +202,17 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
         )
         val_full_ids = encode_texts_cached(val_texts, self.tokenizer, tokenizer_path)
 
-        ellipsis_ids = get_ellipsis_ids(self.tokenizer, tokenizer_path)
-        train_full_ids, train_labels = expand_with_truncation_augmentation(
-            train_texts,
-            train_full_ids,
-            train_labels,
-            max_seq_len,
-            self._sep_token_id,
-            tokenizer_path,
-            ellipsis_ids,
-        )
+        if self._truncation_augmentation:
+            ellipsis_ids = get_ellipsis_ids(self.tokenizer, tokenizer_path)
+            train_full_ids, train_labels = expand_with_truncation_augmentation(
+                train_texts,
+                train_full_ids,
+                train_labels,
+                max_seq_len,
+                self._sep_token_id,
+                tokenizer_path,
+                ellipsis_ids,
+            )
 
         train_ds = TextSequenceDataset(
             train_full_ids, train_labels, max_seq_len, self._sep_token_id

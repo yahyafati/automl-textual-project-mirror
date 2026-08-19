@@ -205,6 +205,9 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         self._stochastic_epoch_fraction: Optional[float] = kwargs.get(
             "stochastic_epoch_fraction", None
         )
+        self._truncation_augmentation: bool = bool(
+            kwargs.get("truncation_augmentation", False)
+        )
         self.vocab = None
         self.model = None
         # self.label_encoder = LabelEncoder()
@@ -278,16 +281,17 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
             val_texts, self.tokenizer, self._tokenizer_path
         )
 
-        ellipsis_ids = get_ellipsis_ids(self.tokenizer, self._tokenizer_path)
-        train_full_ids, train_labels = expand_with_truncation_augmentation(
-            train_texts,
-            train_full_ids,
-            train_labels,
-            max_seq_len,
-            self._sep_token_id,
-            self._tokenizer_path,
-            ellipsis_ids,
-        )
+        if self._truncation_augmentation:
+            ellipsis_ids = get_ellipsis_ids(self.tokenizer, self._tokenizer_path)
+            train_full_ids, train_labels = expand_with_truncation_augmentation(
+                train_texts,
+                train_full_ids,
+                train_labels,
+                max_seq_len,
+                self._sep_token_id,
+                self._tokenizer_path,
+                ellipsis_ids,
+            )
 
         train_ds = TextSequenceDataset(
             train_full_ids, train_labels, max_seq_len, self._sep_token_id

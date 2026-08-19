@@ -468,6 +468,7 @@ class Optimizer(ABC):
                 stochastic_epoch_fraction=self.runtime_config[
                     "stochastic_epoch_fraction"
                 ],
+                truncation_augmentation=self.runtime_config["truncation_augmentation"],
                 approach_params=self.runtime_config.get("approach_params"),
             )
 
@@ -589,6 +590,7 @@ class Optimizer(ABC):
             num_workers=self.runtime_config["num_workers"],
             stochastic_epochs=self.runtime_config["stochastic_epochs"],
             stochastic_epoch_fraction=self.runtime_config["stochastic_epoch_fraction"],
+            truncation_augmentation=self.runtime_config["truncation_augmentation"],
             approach_params=self.runtime_config.get("approach_params"),
         )
 

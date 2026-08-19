@@ -37,6 +37,8 @@ class RuntimeConfig(TypedDict):
     stochastic_epochs: bool
     stochastic_epoch_fraction: float
 
+    truncation_augmentation: bool
+
     num_parallel_trials: int
 
     log_level: str
