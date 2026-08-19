@@ -375,6 +375,7 @@ class Optimizer(ABC):
         device: Optional[torch.device] = None,
         num_workers: Optional[int] = None,
         data_seed: Optional[int] = None,
+        max_time_seconds: Optional[float] = None,
     ) -> float:
         val_error, _ = self._train_single_configuration_with_history(
             config=config,
@@ -383,6 +384,7 @@ class Optimizer(ABC):
             device=device,
             num_workers=num_workers,
             data_seed=data_seed,
+            max_time_seconds=max_time_seconds,
         )
         return val_error
 
@@ -394,6 +396,7 @@ class Optimizer(ABC):
         device: Optional[torch.device] = None,
         num_workers: Optional[int] = None,
         data_seed: Optional[int] = None,
+        max_time_seconds: Optional[float] = None,
     ) -> tuple[float, list[EpochResult]]:
         from automl.core.utils import timer
 
@@ -408,6 +411,11 @@ class Optimizer(ABC):
         # since the model checkpoint carries over between calls but a
         # changing split would silently move rows between train and val.
         data_seed = seed if data_seed is None else data_seed
+        max_time_seconds = (
+            self.runtime_config.get("max_trial_time_seconds")
+            if max_time_seconds is None
+            else max_time_seconds
+        )
 
         model_type = config["model_type"]
         config_id = self._config_to_hash_id(config)
@@ -485,9 +493,7 @@ class Optimizer(ABC):
                     result = _approach.train(
                         prepared_result,
                         epochs=int(budget),
-                        max_time_seconds=self.runtime_config.get(
-                            "max_trial_time_seconds"
-                        ),
+                        max_time_seconds=max_time_seconds,
                         **load_kwargs,
                     )
                     with checkpoint_lock:

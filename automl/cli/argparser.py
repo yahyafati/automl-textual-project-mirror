@@ -38,11 +38,11 @@ DEFAULT_CONFIG: RuntimeConfig = RuntimeConfig(
     ifbo_greedy_candidate_selection=False,
     ifbo_incumbent_ensemble_top_k=3,
     ifbo_incumbent_ensemble_accuracy_threshold=0.05,
-    ifbo_thaw_step=1,
     ifbo_max_wallclock_time=None,
     ifbo_patience=None,
     ifbo_plateau_patience=None,
     ifbo_min_delta=0.001,
+    ifbo_thaw_step=60.0,
 )
 
 
@@ -163,8 +163,11 @@ def create_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--ifbo-thaw-step",
-        type=int,
-        help="Number of steps to thaw each candidate in ifBO.",
+        type=float,
+        help="Wall-clock cap (in seconds) on a single ifBO freeze-thaw step: "
+        "each step trains its selected candidate for at most this long "
+        "(checked once per epoch boundary, resuming from its last "
+        "checkpoint) before freezing it again.",
     )
     parser.add_argument(
         "--ifbo-max-wallclock-time",
