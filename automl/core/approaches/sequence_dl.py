@@ -17,6 +17,8 @@ from automl.core.approaches.text_encoding import (
     TextSequenceDataset,
     collate_sequences,
     encode_texts_cached,
+    expand_with_truncation_augmentation,
+    get_ellipsis_ids,
     load_tokenizer,
 )
 from automl.core.registry import register_approach
@@ -113,7 +115,7 @@ class BiLSTMClassifier(nn.Module):
         dropout: float = 0.5,
         bidirectional: bool = True,
         pretrained_embeddings: Optional[torch.Tensor] = None,
-        padding_idx: int = 0
+        padding_idx: int = 0,
     ):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=padding_idx)
@@ -125,7 +127,7 @@ class BiLSTMClassifier(nn.Module):
             input_size=embed_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
-            batch_first=True, # (B, L, E) instead of (L, B, E)
+            batch_first=True,  # (B, L, E) instead of (L, B, E)
             bidirectional=bidirectional,
             dropout=dropout if num_layers > 1 else 0.0,
         )
@@ -274,6 +276,11 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
         )
         val_full_ids = encode_texts_cached(
             val_texts, self.tokenizer, self._tokenizer_path
+        )
+
+        ellipsis_ids = get_ellipsis_ids(self.tokenizer, self._tokenizer_path)
+        train_full_ids, train_labels = expand_with_truncation_augmentation(
+            train_full_ids, train_labels, max_seq_len, self._sep_token_id, ellipsis_ids
         )
 
         train_ds = TextSequenceDataset(

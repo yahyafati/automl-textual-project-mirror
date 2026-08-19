@@ -116,19 +116,130 @@ def encode_texts_cached(
 
 
 def truncate_ids(
-    ids: list[int], max_seq_len: int, sep_token_id: Optional[int]
+    ids: list[int],
+    max_seq_len: int,
+    sep_token_id: Optional[int],
+    strategy: str = "right",
+    ellipsis_ids: Optional[list[int]] = None,
 ) -> list[int]:
     """Reproduce `tokenizer(text, truncation=True, max_length=max_seq_len)`
-    from fully-encoded `ids` (`[CLS] + content + [SEP]`): if truncation is
-    needed, keep the first `max_seq_len - 1` tokens and re-append
-    `sep_token_id`, matching the tokenizer's own right-truncation-before-SEP
-    behavior, instead of just cutting off SEP with a plain slice.
+    from fully-encoded `ids` (`[CLS] + content + [SEP]`), truncating the
+    *content* span (everything but CLS/SEP) according to `strategy`:
+
+    - "right" (default): keep the first `max_seq_len - 2` content tokens,
+      dropping the tail - matches the tokenizer's own
+      right-truncation-before-SEP behavior.
+    - "left": keep the last `max_seq_len - 2` content tokens, dropping the
+      head.
+    - "center": keep a prefix and a suffix of content with `ellipsis_ids`
+      spliced in between, dropping the middle.
+
+    If `sep_token_id` is None there's no CLS/SEP structure to preserve, so
+    the same strategy is applied to the raw `ids` directly.
     """
     if len(ids) <= max_seq_len:
         return ids
+
     if sep_token_id is None:
+        if strategy == "left":
+            return ids[-max_seq_len:]
+        if strategy == "center":
+            return _splice_center(ids, max_seq_len, ellipsis_ids)
         return ids[:max_seq_len]
-    return ids[: max_seq_len - 1] + [sep_token_id]
+
+    cls_id = ids[0]
+    content = ids[1:-1]
+    budget = max_seq_len - 2  # room left over for CLS + SEP
+    if budget <= 0:
+        return ids[: max_seq_len - 1] + [sep_token_id]
+
+    if strategy == "left":
+        new_content = content[-budget:]
+    elif strategy == "center":
+        new_content = _splice_center(content, budget, ellipsis_ids)
+    else:
+        new_content = content[:budget]
+
+    return [cls_id] + new_content + [sep_token_id]
+
+
+def _splice_center(
+    ids: list[int], budget: int, ellipsis_ids: Optional[list[int]]
+) -> list[int]:
+    """Keep a head and tail slice of `ids` totalling `budget` tokens, with
+    `ellipsis_ids` spliced in between in place of the dropped middle."""
+    ellipsis_ids = ellipsis_ids or []
+    content_budget = budget - len(ellipsis_ids)
+    if content_budget <= 0:
+        return ids[-budget:] if budget > 0 else []
+    head = (content_budget + 1) // 2
+    tail = content_budget - head
+    return ids[:head] + ellipsis_ids + (ids[-tail:] if tail else [])
+
+
+_ellipsis_ids_cache: dict[str, list[int]] = {}
+_ellipsis_ids_cache_lock = threading.Lock()
+
+
+def get_ellipsis_ids(
+    tokenizer: PreTrainedTokenizerBase, tokenizer_path: str
+) -> list[int]:
+    """Token id(s) for "..." under `tokenizer`, cached by `tokenizer_path`
+    (mirrors `encode_texts_cached`'s per-tokenizer caching) - used to mark
+    the dropped middle span in center-truncated sequences."""
+    cached = _ellipsis_ids_cache.get(tokenizer_path)
+    if cached is not None:
+        return cached
+    ids = tokenizer.encode("...", add_special_tokens=False)
+    with _ellipsis_ids_cache_lock:
+        _ellipsis_ids_cache.setdefault(tokenizer_path, ids)
+    return _ellipsis_ids_cache[tokenizer_path]
+
+
+def expand_with_truncation_augmentation(
+    full_input_ids: list[list[int]],
+    labels,
+    max_seq_len: int,
+    sep_token_id: Optional[int],
+    ellipsis_ids: Optional[list[int]] = None,
+) -> tuple[list[list[int]], Optional[list]]:
+    """Data augmentation for training data: every item whose full
+    (untruncated) length exceeds `max_seq_len` is emitted as 3 copies -
+    right-truncated, left-truncated, and center-truncated with an ellipsis -
+    instead of a single one-sided truncation, so the model sees content
+    from all parts of long inputs rather than only ever the first
+    `max_seq_len` tokens. Items already within `max_seq_len` are passed
+    through as a single, unaugmented copy. Labels are duplicated alongside
+    their source item.
+
+    Only meant for training data - callers must NOT use this for
+    validation/test data, since it changes the number and order of items
+    relative to the input, which val/predict need to stay 1:1 with.
+    """
+    labels_list = list(labels) if labels is not None else None
+    expanded_ids: list[list[int]] = []
+    expanded_labels: Optional[list] = [] if labels_list is not None else None
+
+    for i, ids in enumerate(full_input_ids):
+        if len(ids) > max_seq_len:
+            variants = [
+                truncate_ids(ids, max_seq_len, sep_token_id, strategy="right"),
+                truncate_ids(ids, max_seq_len, sep_token_id, strategy="left"),
+                truncate_ids(
+                    ids,
+                    max_seq_len,
+                    sep_token_id,
+                    strategy="center",
+                    ellipsis_ids=ellipsis_ids,
+                ),
+            ]
+        else:
+            variants = [ids]
+        expanded_ids.extend(variants)
+        if expanded_labels is not None:
+            expanded_labels.extend([labels_list[i]] * len(variants))
+
+    return expanded_ids, expanded_labels
 
 
 def collate_sequences(batch, pad_value: int = 0):

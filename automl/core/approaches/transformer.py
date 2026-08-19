@@ -14,6 +14,8 @@ from automl.core.approaches.text_encoding import (
     TextSequenceDataset,
     collate_sequences,
     encode_texts_cached,
+    expand_with_truncation_augmentation,
+    get_ellipsis_ids,
     load_tokenizer,
 )
 from automl.core.registry import register_approach
@@ -196,6 +198,11 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
             train_texts, self.tokenizer, tokenizer_path
         )
         val_full_ids = encode_texts_cached(val_texts, self.tokenizer, tokenizer_path)
+
+        ellipsis_ids = get_ellipsis_ids(self.tokenizer, tokenizer_path)
+        train_full_ids, train_labels = expand_with_truncation_augmentation(
+            train_full_ids, train_labels, max_seq_len, self._sep_token_id, ellipsis_ids
+        )
 
         train_ds = TextSequenceDataset(
             train_full_ids, train_labels, max_seq_len, self._sep_token_id

@@ -14,6 +14,8 @@ from automl.core.approaches.text_encoding import (
     TextSequenceDataset,
     collate_sequences,
     encode_texts_cached,
+    expand_with_truncation_augmentation,
+    get_ellipsis_ids,
     load_tokenizer,
 )
 from automl.core.registry import register_approach
@@ -161,6 +163,11 @@ class SimpleApproach(Approach[torch.nn.Module, dict]):
         )
         val_full_ids = encode_texts_cached(
             val_texts, self.tokenizer, self._tokenizer_path
+        )
+
+        ellipsis_ids = get_ellipsis_ids(self.tokenizer, self._tokenizer_path)
+        train_full_ids, train_labels = expand_with_truncation_augmentation(
+            train_full_ids, train_labels, max_seq_len, self._sep_token_id, ellipsis_ids
         )
 
         train_ds = TextSequenceDataset(
