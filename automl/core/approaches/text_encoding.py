@@ -196,11 +196,34 @@ def get_ellipsis_ids(
     return _ellipsis_ids_cache[tokenizer_path]
 
 
+_truncation_variants_cache: dict[tuple[str, int], dict[str, list[list[int]]]] = {}
+_truncation_variants_cache_lock = threading.Lock()
+
+
+def _truncation_variants(
+    ids: list[int],
+    max_seq_len: int,
+    sep_token_id: Optional[int],
+    ellipsis_ids: Optional[list[int]],
+) -> list[list[int]]:
+    if len(ids) <= max_seq_len:
+        return [ids]
+    return [
+        truncate_ids(ids, max_seq_len, sep_token_id, strategy="right"),
+        truncate_ids(ids, max_seq_len, sep_token_id, strategy="left"),
+        truncate_ids(
+            ids, max_seq_len, sep_token_id, strategy="center", ellipsis_ids=ellipsis_ids
+        ),
+    ]
+
+
 def expand_with_truncation_augmentation(
+    texts: list[str],
     full_input_ids: list[list[int]],
     labels,
     max_seq_len: int,
     sep_token_id: Optional[int],
+    tokenizer_path: str,
     ellipsis_ids: Optional[list[int]] = None,
 ) -> tuple[list[list[int]], Optional[list]]:
     """Data augmentation for training data: every item whose full
@@ -212,29 +235,31 @@ def expand_with_truncation_augmentation(
     through as a single, unaugmented copy. Labels are duplicated alongside
     their source item.
 
+    The resulting variants are cached by (tokenizer_path, max_seq_len, text)
+    - mirroring `encode_texts_cached` - since the same text commonly
+    recurs across many calls: ifBO re-invokes `prepare()` (and thus this)
+    on every freeze-thaw resume of the *same* config with an unchanged
+    train split, and later trials resample texts already seen by earlier
+    ones. Caching skips redoing the truncation slicing in all those cases.
+
     Only meant for training data - callers must NOT use this for
     validation/test data, since it changes the number and order of items
     relative to the input, which val/predict need to stay 1:1 with.
     """
+    cache = _truncation_variants_cache.setdefault((tokenizer_path, max_seq_len), {})
+
     labels_list = list(labels) if labels is not None else None
     expanded_ids: list[list[int]] = []
     expanded_labels: Optional[list] = [] if labels_list is not None else None
 
-    for i, ids in enumerate(full_input_ids):
-        if len(ids) > max_seq_len:
-            variants = [
-                truncate_ids(ids, max_seq_len, sep_token_id, strategy="right"),
-                truncate_ids(ids, max_seq_len, sep_token_id, strategy="left"),
-                truncate_ids(
-                    ids,
-                    max_seq_len,
-                    sep_token_id,
-                    strategy="center",
-                    ellipsis_ids=ellipsis_ids,
-                ),
-            ]
-        else:
-            variants = [ids]
+    for i, text in enumerate(texts):
+        variants = cache.get(text)
+        if variants is None:
+            variants = _truncation_variants(
+                full_input_ids[i], max_seq_len, sep_token_id, ellipsis_ids
+            )
+            with _truncation_variants_cache_lock:
+                variants = cache.setdefault(text, variants)
         expanded_ids.extend(variants)
         if expanded_labels is not None:
             expanded_labels.extend([labels_list[i]] * len(variants))

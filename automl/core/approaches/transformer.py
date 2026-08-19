@@ -201,7 +201,13 @@ class TransformerApproach(Approach[TransformerClassifier, dict]):
 
         ellipsis_ids = get_ellipsis_ids(self.tokenizer, tokenizer_path)
         train_full_ids, train_labels = expand_with_truncation_augmentation(
-            train_full_ids, train_labels, max_seq_len, self._sep_token_id, ellipsis_ids
+            train_texts,
+            train_full_ids,
+            train_labels,
+            max_seq_len,
+            self._sep_token_id,
+            tokenizer_path,
+            ellipsis_ids,
         )
 
         train_ds = TextSequenceDataset(

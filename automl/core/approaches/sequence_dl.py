@@ -280,7 +280,13 @@ class SequenceDLApproach(Approach[torch.nn.Module, dict]):
 
         ellipsis_ids = get_ellipsis_ids(self.tokenizer, self._tokenizer_path)
         train_full_ids, train_labels = expand_with_truncation_augmentation(
-            train_full_ids, train_labels, max_seq_len, self._sep_token_id, ellipsis_ids
+            train_texts,
+            train_full_ids,
+            train_labels,
+            max_seq_len,
+            self._sep_token_id,
+            self._tokenizer_path,
+            ellipsis_ids,
         )
 
         train_ds = TextSequenceDataset(
